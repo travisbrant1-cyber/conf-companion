@@ -88,6 +88,28 @@
 </div>
 <script src="qrcode.js"></script>
 <script>
+// Boondit emulator bridge shim — no-op on device / outside an iframe
+(function () {
+  if (window.parent === window) return;
+  var EVENTS = ["scrollUp", "scrollDown", "sideClick", "longPressStart", "longPressEnd"];
+  window.addEventListener("message", function (e) {
+    var d = e.data;
+    if (!d || d.__r1emu !== true) return;
+    if (d.type === "event" && EVENTS.indexOf(d.event) !== -1) {
+      window.dispatchEvent(new CustomEvent(d.event, { detail: d.detail }));
+    } else if (d.type === "pluginMessage" && typeof window.onPluginMessage === "function") {
+      window.onPluginMessage(d.payload);
+    }
+  });
+  function relay(name) {
+    return { postMessage: function (msg) { window.parent.postMessage({ __r1emu: true, type: "outbound", channel: name, msg: msg }, "*"); } };
+  }
+  window.PluginMessageHandler = relay("PluginMessageHandler");
+  window.CreationVoiceHandler = relay("CreationVoiceHandler");
+  window.closeWebView = relay("closeWebView");
+})();
+</script>
+<script>
 var BACKEND = location.origin;
 var cfg = { name:'', linkedin:'', landing:'', landingLabel:'', companySummary:'', sessions:[] };
 var devId = null;   // pairing key, generated once, persisted
