@@ -42,49 +42,62 @@
 
 <h2>Networking</h2>
 <label>Your name (shown on QR screen)</label><input id="name">
-<label>LinkedIn profile URL</label><input id="linkedin" placeholder="https://www.linkedin.com/in/you">
-<label>Landing page URL (optional)</label><input id="landing" placeholder="https://yourco.com/demo">
+<label>LinkedIn profile URL</label><input id="linkedin" placeholder="www.linkedin.com/in/you">
+<label>Landing page URL (optional)</label><input id="landing" placeholder="yourco.com/demo">
 <label>Landing page label</label><input id="landingLabel" placeholder="Product demo">
-<button onclick="saveBasic()">Save</button>
-<div class="out" id="outBasic"></div>
 
 <h2>Conference schedule</h2>
-<label>Agenda page URL</label><input id="scheduleUrl" placeholder="https://conf.example.com/agenda">
+<label>Agenda page URL</label><input id="scheduleUrl" placeholder="conf.example.com/agenda">
 <button onclick="importSchedule()" id="btnSched">Import schedule</button>
 <div class="out" id="outSched"></div>
 <div id="sessPreview"></div>
 
 <h2>Your company (intel base)</h2>
-<label>Company website URL</label><input id="companyUrl" placeholder="https://yourco.com">
+<label>Company website URL</label><input id="companyUrl" placeholder="yourco.com">
 <button onclick="scanCompany()" id="btnCo">Scan site</button>
 <div class="out" id="outCo"></div>
+
+<div style="border-top:2px solid #f60; margin-top:24px; padding-top:14px; display:flex; gap:10px;">
+  <button onclick="saveAll()" style="flex:2">💾 Save all</button>
+  <button onclick="syncPhone()" style="flex:1; background:#333; color:#fff">⟳ Sync</button>
+</div>
+<div class="out" id="outBasic" style="margin-top:8px"></div>
 
 <script>
 function $(id){ return document.getElementById(id); }
 var DEV = new URLSearchParams(location.search).get('d') || localStorage.getItem('cc_dev') || '';
 if (DEV){
   localStorage.setItem('cc_dev', DEV);
-  // keep ?d= in the URL so Add-to-Home-Screen bookmarks the paired page
   if (!location.search.includes('d=')) history.replaceState(null,'', '/setup?d='+DEV);
-  var pill = $('pairPill') || document.getElementById('pairPill');
-  document.getElementById('pairPill').style.display='inline';
-  document.getElementById('pairPill').textContent = 'paired: '+DEV;
-  document.getElementById('manifestLink').href = '/manifest.json?d='+DEV;
+  var pill = $('pairPill');
+  pill.style.display='inline'; pill.textContent = 'paired: '+DEV;
+  $('manifestLink').href = '/manifest.json?d='+DEV;
 }
+// ---------- URL normalization ----------
+function normalizeUrl(v){
+  v = (v||'').trim();
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  return v.replace(/\s+/g,'');
+}
+['linkedin','landing','scheduleUrl','companyUrl'].forEach(function(id){
+  var el = $(id);
+  if (el) el.addEventListener('blur', function(){ el.value = normalizeUrl(el.value); });
+});
 // Add-to-home-screen prompt
 (function(){
   var deferred = null;
   window.addEventListener('beforeinstallprompt', function(e){
     e.preventDefault(); deferred = e;
-    var b = document.getElementById('a2hs'); b.style.display='block';
-    document.getElementById('a2hsHow').innerHTML = '<button onclick="window.__a2hs()">Add to home screen</button>';
+    var b = $('a2hs'); b.style.display='block';
+    $('a2hsHow').innerHTML = '<button onclick="window.__a2hs()">Add to home screen</button>';
     window.__a2hs = function(){ deferred.prompt(); };
   });
   var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if (!standalone){
-    var b = document.getElementById('a2hs'); b.style.display='block';
-    document.getElementById('a2hsHow').textContent = isIOS
+    var b = $('a2hs'); b.style.display='block';
+    $('a2hsHow').textContent = isIOS
       ? 'iPhone: tap Share ▸ Add to Home Screen.'
       : 'Android: menu ⋮ ▸ Add to Home screen.';
   }
@@ -100,7 +113,6 @@ async function api(path, body){
     var ctl = new AbortController(); var t = setTimeout(function(){ ctl.abort(); }, 8000);
     r = await fetch(url, Object.assign({signal:ctl.signal}, opts)); clearTimeout(t);
   } catch(e){
-    // cold start — retry patiently
     document.title = 'Waking server…';
     r = await fetch(url, opts);
     document.title = 'Conf Companion — Setup';
@@ -134,38 +146,79 @@ async function load(){
     if (c.companySummary) out('outCo', 'Company intel saved (' + c.companySummary.length + ' chars).');
   } catch(e){}
 }
-async function saveBasic(){
+// ---------- Save all ----------
+async function saveAll(){
+  var payload = {
+    name: $('name').value.trim(),
+    linkedin: normalizeUrl($('linkedin').value.trim()),
+    landing: normalizeUrl($('landing').value.trim()),
+    landingLabel: $('landingLabel').value.trim(),
+    scheduleUrl: normalizeUrl($('scheduleUrl').value.trim()),
+    companyUrl: normalizeUrl($('companyUrl').value.trim())
+  };
+  ['linkedin','landing','scheduleUrl','companyUrl'].forEach(function(id){ $(id).value = payload[id]; });
   try {
-    await api('/api/config', { name:$('name').value.trim(), linkedin:$('linkedin').value.trim(),
-      landing:$('landing').value.trim(), landingLabel:$('landingLabel').value.trim() });
+    await api('/api/config', payload);
     var c = await api('/api/config'); backupLocal(c);
-    out('outBasic', 'Saved ✓ — hit Sync on the R1.');
+    out('outBasic', 'Saved ✓ — the R1 will auto-sync within ~20s.');
+  } catch(e){ out('outBasic', 'Error: '+e.message, 1); }
+}
+// ---------- Sync (pull from server, confirm on phone) ----------
+async function syncPhone(){
+  try {
+    var c = await api('/api/config');
+    backupLocal(c);
+    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    if ((c.sessions||[]).length) preview(c.sessions);
+    out('outBasic', 'Synced ✓ from server — ' + (c.sessions||[]).length + ' sessions, rev ' + (c.rev||0) + '.');
   } catch(e){ out('outBasic', 'Error: '+e.message, 1); }
 }
 function preview(ss){
-  $('sessPreview').innerHTML = ss.slice(0,50).map(function(s){
+  var shown = ss.slice(0,6), rest = ss.length - shown.length;
+  var html = shown.map(function(s){
     return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
   }).join('');
+  if (rest > 0) html += '<div class="sess" id="moreSess" onclick="showAll()" style="color:#f60;cursor:pointer">▸ show '+rest+' more</div>';
+  else html += '<div class="sess" style="color:#666" onclick="hideAll()">▴ collapse</div>';
+  $('sessPreview').innerHTML = html;
 }
+function showAll(){
+  api('/api/config').then(function(c){
+    if ((c.sessions||[]).length) preview(c.sessions, true);
+  });
+}
+function preview(ss, all){
+  all = !!all;
+  var shown = all ? ss.slice(0,50) : ss.slice(0,6), rest = ss.length - shown.length;
+  var html = shown.map(function(s){
+    return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
+  }).join('');
+  if (!all && rest > 0) html += '<div class="sess" style="color:#f60;cursor:pointer" onclick="showAll()">▸ show '+rest+' more</div>';
+  else if (all) html += '<div class="sess" style="color:#666;cursor:pointer" onclick="preview([])">▴ collapse</div>';
+  $('sessPreview').innerHTML = html;
+}
+function hideAll(){ preview([]); }
 async function importSchedule(){
-  var u = $('scheduleUrl').value.trim();
+  var u = normalizeUrl($('scheduleUrl').value.trim());
+  $('scheduleUrl').value = u;
   if (!u) return out('outSched','Enter a URL',1);
   $('btnSched').disabled = true; out('outSched','Fetching + parsing…');
   try {
     var j = await api('/api/schedule', { url:u });
-    if (j.sessions.length){ out('outSched', j.sessions.length + ' sessions extracted ✓'); preview(j.sessions);
+    if (j.sessions.length){ out('outSched', j.sessions.length + ' sessions extracted ✓ — R1 will auto-sync.'); preview(j.sessions);
       var c = await api('/api/config'); backupLocal(c); }
     else out('outSched', 'No time-pattern sessions found on that page. Try the printable/simple agenda URL.', 1);
   } catch(e){ out('outSched','Error: '+e.message,1); }
   $('btnSched').disabled = false;
 }
 async function scanCompany(){
-  var u = $('companyUrl').value.trim();
+  var u = normalizeUrl($('companyUrl').value.trim());
+  $('companyUrl').value = u;
   if (!u) return out('outCo','Enter a URL',1);
   $('btnCo').disabled = true; out('outCo','Scanning…');
   try {
     var j = await api('/api/extract', { url:u, save:'company' });
-    out('outCo', 'Saved ✓ ('+j.text.length+' chars). Preview:\n' + j.text.slice(0,300) + '…');
+    out('outCo', 'Saved ✓ ('+j.text.length+' chars). Preview:\\n' + j.text.slice(0,300) + '…');
     var c = await api('/api/config'); backupLocal(c);
   } catch(e){ out('outCo','Error: '+e.message,1); }
   $('btnCo').disabled = false;

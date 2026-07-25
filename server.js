@@ -16,7 +16,7 @@ function devPath(id) {
 }
 function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
-  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [] }; }
+  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], rev: 0 }; }
 }
 function saveConfig(id, cfg) { fs.writeFileSync(devPath(id), JSON.stringify(cfg, null, 2)); }
 
@@ -167,8 +167,9 @@ const server = http.createServer(async (req, res) => {
       const id = body.d || qd;
       delete body.d;
       const cfg = { ...loadConfig(id), ...body };
+      cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, rev: cfg.rev });
     }
     if (p === '/api/schedule' && req.method === 'POST') {
       const { url, d } = await readBody(req);
@@ -180,6 +181,7 @@ const server = http.createServer(async (req, res) => {
       const cfg = loadConfig(id);
       cfg.scheduleUrl = url;
       if (sessions.length) cfg.sessions = sessions;
+      cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
       return send(res, 200, { sessions, source: structured ? 'structured' : 'heuristic', rawText: sessions.length ? undefined : htmlToText(html).slice(0, 6000) });
     }

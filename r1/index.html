@@ -227,10 +227,14 @@ async function loadLocal(){
     if (c) cfg = JSON.parse(decodeURIComponent(escape(atob(c))));
     var f = await store().getItem('cc_favs');
     if (f) favs = JSON.parse(atob(f));
+    var rv = await store().getItem('cc_rev');
+    if (rv) cfgRev = parseInt(atob(rv), 10) || 0;
   } catch(e){}
 }
 
 // ---------- sync ----------
+var cfgRev = 0;
+function revOf(c){ return c && typeof c.rev === 'number' ? c.rev : 0; }
 function sync(silent){
   loading(true);
   return wakeFetch(BACKEND + '/api/config?d=' + devId, {}, function(){
@@ -238,15 +242,31 @@ function sync(silent){
     })
     .then(function(r){ return r.json(); })
     .then(function(j){
-      cfg = j; saveLocal();
+      var newRev = revOf(j);
+      var changed = newRev !== cfgRev;
+      cfg = j; cfgRev = newRev;
+      try { store().setItem('cc_rev', btoa(String(cfgRev))); } catch(e){}
+      saveLocal();
       $('statusDot').classList.add('live');
-      if (!silent) toast('SYNCED', (cfg.sessions||[]).length + ' sessions loaded.<br>LinkedIn: ' + (cfg.linkedin?'✓':'—') + ' · Landing: ' + (cfg.landing?'✓':'—') + '<br>Company intel: ' + (cfg.companySummary?'✓':'—'));
+      if (!silent || changed) toast('SYNCED', (cfg.sessions||[]).length + ' sessions loaded.<br>LinkedIn: ' + (cfg.linkedin?'✓':'—') + ' · Landing: ' + (cfg.landing?'✓':'—') + '<br>Company intel: ' + (cfg.companySummary?'✓':'—'));
     })
     .catch(function(e){
       $('statusDot').classList.remove('live');
       if (!silent) toast('OFFLINE', 'Could not reach backend.<br>Using saved data.');
     })
     .then(function(){ loading(false); if (silent) renderHome(); });
+}
+// Phone-driven auto-sync: poll the backend rev every 20s; pull if the phone bumped it.
+function startAutoSync(){
+  setInterval(function(){
+    if (curScreen === 'scan') return; // don't fight the camera
+    wakeFetch(BACKEND + '/api/config?d=' + devId, { method: 'GET' }, null)
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (revOf(j) !== cfgRev) sync(true);
+      })
+      .catch(function(){});
+  }, 20000);
 }
 
 // ---------- screens ----------
@@ -527,6 +547,7 @@ async function boot(){
   await loadLocal();
   renderHome();
   sync(true);
+  startAutoSync();
 }
 boot();
 </script>
