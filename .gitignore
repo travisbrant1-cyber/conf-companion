@@ -2,3 +2,4 @@ data/
 tmp-qr.b64
 test-agenda.html
 node_modules/
+config.json
