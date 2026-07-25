@@ -41,6 +41,7 @@
     animation:sp .8s linear infinite; }
   @keyframes sp { to { transform:rotate(360deg); } }
   body.loading .hdr { border-bottom-color:#ff0; }
+  .daydiv { padding:6px 6px 3px; font-size:9px; letter-spacing:1px; color:#f60; border-bottom:1px solid #333; background:#0a0a0a; position:sticky; top:0; }
 </style>
 </head>
 <body>
@@ -377,14 +378,28 @@ function openSchedule(){
     toast('NO SCHEDULE', 'Import the agenda URL from the setup page:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
     return;
   }
-  // favorites first
-  var ordered = ss.slice().sort(function(a,b){ return (favs[b.id]?1:0) - (favs[a.id]?1:0); });
-  ordered.forEach(function(s){
-    L.appendChild(mkRow(s.time.split(/[-–]/)[0].replace(/[APMapm\s]/g,'').slice(0,5) || '·',
+  // favorites first, then the rest in agenda order with day dividers
+  var favSs = ss.filter(function(s){ return favs[s.id]; });
+  var rest = ss.filter(function(s){ return !favs[s.id]; });
+  function divider(txt){
+    var d = document.createElement('div');
+    d.className = 'daydiv';
+    d.textContent = txt;
+    L.appendChild(d);
+  }
+  if (favSs.length) divider('★ FAVORITES');
+  favSs.forEach(addRow);
+  var lastDay = null;
+  rest.forEach(function(s){
+    if (s.day && s.day !== lastDay){ lastDay = s.day; divider(s.day.toUpperCase().slice(0, 30)); }
+    addRow(s);
+  });
+  function addRow(s){
+    L.appendChild(mkRow(s.time.split(/[-–]/)[0].replace(/^[A-Za-z]{3}\s+\d{1,2}\s+/,'').replace(/[APMapm\s]/g,'').slice(0,5) || '·',
       s.title, s.time + (s.speaker ? ' · ' + s.speaker : ''),
       function(){ openSession(s); }, !!favs[s.id]));
-  });
-  var favN = ordered.filter(function(s){ return favs[s.id]; }).length;
+  }
+  var favN = favSs.length;
   $('schedCount').textContent = ss.length + ' · ' + favN + '★';
   show('sched'); registerList(L);
 }
@@ -392,7 +407,8 @@ function openSession(s){
   sessFromScan = false;
   $('sessHdr').textContent = s.time;
   $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(s.title) + '</b>' +
-    (s.speaker ? '<div style="color:#999;margin-top:3px">' + esc(s.speaker) + '</div>' : '');
+    (s.speaker ? '<div style="color:#999;margin-top:3px">' + esc(s.speaker) + '</div>' : '') +
+    (s.desc ? '<div style="color:#777;font-size:10px;margin-top:4px">' + esc(s.desc.slice(0,220)) + '</div>' : '');
   var L = $('sessList'); L.innerHTML = '';
   L.appendChild(mkRow('★', favs[s.id] ? 'Unfavorite' : 'Favorite', null, function(){
     favs[s.id] = !favs[s.id]; saveLocal(); openSession(s);

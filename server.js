@@ -51,6 +51,63 @@ function htmlToText(html) {
 }
 
 // ---------- Schedule parsing (heuristic) ----------
+// Strategy 0: structured JSON embedded in the page. Many conference sites (WBR/eTail,
+// anything Vue/React server-seeded, or schema.org ld+json) ship the full agenda inline.
+function decodeEntities(s) {
+  return s.replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>').replace(/&#(\d+);/g, (m, d) => String.fromCharCode(+d))
+          .replace(/&amp;/g, '&');
+}
+function stripTags(s) { return String(s || '').replace(/<[^>]+>/g, '').trim(); }
+function speakerLine(sp) {
+  if (!Array.isArray(sp)) return '';
+  return sp.map(x => [x.name, x.job_title, x.company].filter(Boolean).join(', ')).join(' · ').slice(0, 160);
+}
+function parseStructured(html) {
+  // 0a: WBR/Vue ":days" prop — HTML-escaped JSON array of {name, groups[{tracks[{sessions[...]}]}]}
+  let m = html.match(/:days\s*=\s*"(\[[\s\S]*?)"\s*[:>a-z-]/i);
+  if (m) {
+    try {
+      const days = JSON.parse(decodeEntities(m[1]));
+      const out = [];
+      for (const d of days) {
+        const dayShort = stripTags(d.date_shortest || d.name || '');
+        for (const g of d.groups || []) for (const t of g.tracks || []) for (const s of t.sessions || []) {
+          const time = (dayShort ? dayShort + ' ' : '') + (s.start || '') + (s.end ? '–' + s.end : '');
+          out.push({
+            id: out.length,
+            time: time.trim().slice(0, 40),
+            title: stripTags(s.name).slice(0, 120),
+            speaker: speakerLine(s.speakers),
+            desc: stripTags(s.description).slice(0, 500),
+            day: stripTags(d.name || '')
+          });
+        }
+      }
+      if (out.length) return out;
+    } catch (e) { /* fall through */ }
+  }
+  // 0b: schema.org ld+json Event/EventSchedule blocks
+  const ld = [...html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const b of ld) {
+    try {
+      let j = JSON.parse(b[1].trim());
+      const items = Array.isArray(j) ? j : (j['@graph'] || [j]);
+      const evs = items.filter(x => /Event/i.test(String(x['@type'])) && x.name && x.startDate);
+      if (evs.length >= 3) {
+        return evs.slice(0, 200).map((e, i) => ({
+          id: i,
+          time: String(e.startDate).replace('T', ' ').slice(0, 16),
+          title: stripTags(e.name).slice(0, 120),
+          speaker: stripTags((e.performer && (e.performer.name || (e.performer[0] || {}).name)) || '').slice(0, 80),
+          desc: stripTags(e.description || '').slice(0, 500)
+        }));
+      }
+    } catch (e) { /* fall through */ }
+  }
+  return null;
+}
+
 // Looks for lines with time patterns; the following title-ish text becomes the session.
 const TIME_RE = /\b(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?(?:\s*[-–—to]+\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)?)\b/;
 function parseSchedule(text) {
@@ -117,13 +174,14 @@ const server = http.createServer(async (req, res) => {
       const { url, d } = await readBody(req);
       const id = d || qd;
       if (!url) return send(res, 400, { error: 'url required' });
-      const text = htmlToText(await fetchHtml(url));
-      const sessions = parseSchedule(text);
+      const html = await fetchHtml(url);
+      const structured = parseStructured(html);
+      const sessions = structured || parseSchedule(htmlToText(html));
       const cfg = loadConfig(id);
       cfg.scheduleUrl = url;
       if (sessions.length) cfg.sessions = sessions;
       saveConfig(id, cfg);
-      return send(res, 200, { sessions, rawText: sessions.length ? undefined : text.slice(0, 6000) });
+      return send(res, 200, { sessions, source: structured ? 'structured' : 'heuristic', rawText: sessions.length ? undefined : htmlToText(html).slice(0, 6000) });
     }
     if (p === '/api/extract' && req.method === 'POST') {
       const { url, save, d } = await readBody(req);
