@@ -76,6 +76,15 @@
     <div class="center" id="msgBody"></div>
     <div class="tip">hold PTT / swipe → back</div>
   </div>
+  <div class="screen" id="scan">
+    <div class="hdr"><span class="dot live" style="background:#f60"></span>SCAN LINKEDIN QR</div>
+    <div style="flex:1;position:relative;background:#000;overflow:hidden">
+      <video id="scanVid" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+      <div style="position:absolute;inset:20px;border:2px solid #f60;border-radius:8px;pointer-events:none"></div>
+      <div id="scanHint" style="position:absolute;left:0;right:0;bottom:4px;text-align:center;font-size:10px;color:#f60;text-shadow:0 0 3px #000">phone: LinkedIn ▸ search ▸ QR icon</div>
+    </div>
+    <div class="tip">aim at phone QR · hold PTT cancel</div>
+  </div>
 </div>
 <script src="qrcode.js"></script>
 <script>
@@ -135,7 +144,8 @@ function activate(){
 }
 function goBack(){
   if (curScreen === 'home') return;
-  if (curScreen === 'sess'){ openSchedule(); return; }
+  if (curScreen === 'scan'){ stopScan(); goHome(); return; }
+  if (curScreen === 'sess'){ if (sessFromScan){ sessFromScan = false; goHome(); } else openSchedule(); return; }
   if (curScreen === 'intel'){ show(backTo==='sess' ? 'sess' : 'home'); if(curScreen==='sess') registerList($('sessList')); return; }
   goHome();
 }
@@ -224,7 +234,8 @@ function mkRow(bullet, t1, t2, fn, favMark){
 }
 function renderHome(){
   var L = $('homeList'); L.innerHTML = '';
-  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect' : 'not set — open setup', showLinkedIn));
+  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect' : 'not set — scan yours', showLinkedIn));
+  L.appendChild(mkRow('📷', 'Scan my LinkedIn', 'from phone QR (search ▸ QR)', startScan));
   L.appendChild(mkRow('◨', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
   var favN = Object.keys(favs).filter(function(k){ return favs[k]; }).length;
   L.appendChild(mkRow('S', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
@@ -255,6 +266,88 @@ function showPairQR(){
   var url = BACKEND + '/setup?d=' + devId;
   renderQR('PAIR PHONE', url, 'scan → fill in → Sync');
 }
+
+// ---------- LinkedIn QR scanner (R1 camera + jsQR) ----------
+var scanStream = null, scanRAF = 0, scanCanvas = null, jsQRLoading = false;
+var sessFromScan = false;
+function loadJsQR(cb){
+  if (window.jsQR) return cb();
+  if (jsQRLoading) return;
+  jsQRLoading = true;
+  var s = document.createElement('script');
+  s.src = 'jsQR.js';
+  s.onload = cb;
+  s.onerror = function(){ jsQRLoading = false; toast('SCAN ERROR', 'QR decoder failed to load.<br>Check connection, retry.'); };
+  document.body.appendChild(s);
+}
+function startScan(){
+  loadJsQR(function(){
+    show('scan'); selItems = [];
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 480} } })
+      .then(function(stream){
+        scanStream = stream;
+        var v = $('scanVid');
+        v.srcObject = stream;
+        v.play();
+        if (!scanCanvas) scanCanvas = document.createElement('canvas');
+        scanLoop();
+      })
+      .catch(function(e){
+        toast('CAMERA BLOCKED', 'Camera unavailable (' + esc(e.name || e.message) + ').<br>Type the URL on the setup page instead — Pair phone → LinkedIn field.');
+      });
+  });
+}
+var _lastDecode = 0;
+function scanLoop(){
+  if (curScreen !== 'scan' || !scanStream) return;
+  scanRAF = requestAnimationFrame(scanLoop);
+  var now = Date.now();
+  if (now - _lastDecode < 250) return; // decode ~4fps — MT6765 budget
+  _lastDecode = now;
+  var v = $('scanVid');
+  if (v.readyState < 2 || !v.videoWidth) return;
+  var w = 320, h = Math.round(v.videoHeight * (320 / v.videoWidth));
+  scanCanvas.width = w; scanCanvas.height = h;
+  var ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(v, 0, 0, w, h);
+  var code = null;
+  try { code = window.jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' }); } catch(e){}
+  if (code && code.data) onScanned(code.data.trim());
+}
+function stopScan(){
+  cancelAnimationFrame(scanRAF);
+  if (scanStream){ scanStream.getTracks().forEach(function(t){ t.stop(); }); scanStream = null; }
+  var v = $('scanVid'); if (v) v.srcObject = null;
+}
+function isLinkedInUrl(s){ return /^https?:\/\/(www\.)?linkedin\.com\/(in\/|pub\/|profile|qr)/i.test(s) || /^https?:\/\/lnkd\.in\//i.test(s); }
+function onScanned(data){
+  stopScan();
+  if (!/^https?:\/\//i.test(data)){
+    toast('NOT A LINK', 'Scanned: ' + esc(data.slice(0,60)) + '<br>Point at the LinkedIn QR (search bar ▸ QR icon).');
+    return;
+  }
+  var isLI = isLinkedInUrl(data);
+  // confirm screen with save row
+  sessFromScan = true;
+  $('sessHdr').textContent = isLI ? 'LINKEDIN FOUND' : 'LINK FOUND';
+  $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(data.replace(/^https?:\/\/(www\.)?/,'').slice(0,80)) + '</b>' +
+    (isLI ? '' : '<div style="color:#fa0;margin-top:3px">⚠ not a linkedin.com link</div>');
+  var L = $('sessList'); L.innerHTML = '';
+  L.appendChild(mkRow('✓', 'Save as my LinkedIn', 'syncs to phone too', function(){ saveScannedLinkedIn(data); }));
+  L.appendChild(mkRow('↺', 'Rescan', null, startScan));
+  show('sess'); registerList(L);
+}
+function saveScannedLinkedIn(url){
+  cfg.linkedin = url;
+  saveLocal();
+  loading(true);
+  wakeFetch(BACKEND + '/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ d: devId, linkedin: url })
+  }).then(function(){ loading(false); toast('SAVED ✓', 'LinkedIn deep link stored.<br>Phone setup page has it too.'); renderHomeSoon(); })
+    .catch(function(){ loading(false); toast('SAVED ON R1', 'Stored locally.<br>Server sync failed — will land on next Sync.'); renderHomeSoon(); });
+}
+function renderHomeSoon(){ setTimeout(renderHome, 1600); }
 function openSchedule(){
   var L = $('schedList'); L.innerHTML = '';
   var ss = cfg.sessions || [];
@@ -274,6 +367,7 @@ function openSchedule(){
   show('sched'); registerList(L);
 }
 function openSession(s){
+  sessFromScan = false;
   $('sessHdr').textContent = s.time;
   $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(s.title) + '</b>' +
     (s.speaker ? '<div style="color:#999;margin-top:3px">' + esc(s.speaker) + '</div>' : '');
