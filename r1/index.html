@@ -193,11 +193,20 @@ function toast(title, text){
 }
 
 // ---------- storage ----------
+// Firmware naming split: current = r1.storage.plain, legacy = window.creationStorage.plain.
+// Fall back to localStorage so devId NEVER regenerates between launches.
+function store(){
+  if (window.r1 && r1.storage && r1.storage.plain) return r1.storage.plain;
+  if (window.creationStorage && creationStorage.plain) return creationStorage.plain;
+  return {
+    setItem: function(k, v){ localStorage.setItem(k, v); return Promise.resolve(); },
+    getItem: function(k){ return Promise.resolve(localStorage.getItem(k)); }
+  };
+}
 function saveLocal(){
-  if (!window.creationStorage) return;
   try {
-    window.creationStorage.plain.setItem('cc_cfg', btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
-    window.creationStorage.plain.setItem('cc_favs', btoa(JSON.stringify(favs)));
+    store().setItem('cc_cfg', btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
+    store().setItem('cc_favs', btoa(JSON.stringify(favs)));
   } catch(e){}
 }
 function mkDevId(){
@@ -206,20 +215,17 @@ function mkDevId(){
   return s;
 }
 async function initDevId(){
-  if (window.creationStorage){
-    try { var v = await window.creationStorage.plain.getItem('cc_dev'); if (v) devId = atob(v); } catch(e){}
-  }
+  try { var v = await store().getItem('cc_dev'); if (v) devId = atob(v); } catch(e){}
   if (!devId){
     devId = mkDevId();
-    if (window.creationStorage){ try { await window.creationStorage.plain.setItem('cc_dev', btoa(devId)); } catch(e){} }
+    try { await store().setItem('cc_dev', btoa(devId)); } catch(e){}
   }
 }
 async function loadLocal(){
-  if (!window.creationStorage) return;
   try {
-    var c = await window.creationStorage.plain.getItem('cc_cfg');
+    var c = await store().getItem('cc_cfg');
     if (c) cfg = JSON.parse(decodeURIComponent(escape(atob(c))));
-    var f = await window.creationStorage.plain.getItem('cc_favs');
+    var f = await store().getItem('cc_favs');
     if (f) favs = JSON.parse(atob(f));
   } catch(e){}
 }
