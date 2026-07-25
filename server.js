@@ -3,6 +3,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
+const dns = require('dns').promises;
 
 const PORT = process.env.PORT || 8787;
 const ROOT = __dirname;
@@ -20,8 +22,38 @@ function loadConfig(id) {
 }
 function saveConfig(id, cfg) { fs.writeFileSync(devPath(id), JSON.stringify(cfg, null, 2)); }
 
+// ---------- SSRF guard: only allow http(s) to public hosts ----------
+// Blocks file:, localhost, link-local (169.254.169.254), loopback, and private ranges.
+function isPrivateIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 10 || a === 127 || a === 0 || a === 169 && b === 254 ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127); // CGNAT 100.64/10
+  }
+  if (net.isIPv6(ip)) {
+    const l = ip.toLowerCase().split('%')[0];
+    return l === '::1' || l.startsWith('fe80:') || l.startsWith('fc') || l.startsWith('fd') || l === '::';
+  }
+  return false;
+}
+async function assertPublicUrl(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { throw new Error('invalid URL'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('only http(s) allowed');
+  const host = u.hostname;
+  // direct IP literal
+  if (net.isIP(host)) { if (isPrivateIp(host)) throw new Error('private address blocked'); return; }
+  // resolve hostname (incl. IPv6) and reject if any resolution is private
+  let addrs;
+  try { addrs = await dns.lookup(host, { all: true }); }
+  catch (e) { throw new Error('DNS resolution failed'); }
+  for (const a of addrs) if (isPrivateIp(a.address)) throw new Error('private address blocked');
+}
+
 // ---------- HTML fetching + cleaning ----------
 async function fetchHtml(url, timeoutMs = 12000) {
+  await assertPublicUrl(url);
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
