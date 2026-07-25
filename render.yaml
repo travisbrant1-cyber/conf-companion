@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: conf-companion
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server.js
+    healthCheckPath: /healthz

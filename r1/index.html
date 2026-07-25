@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
+<title>Conf Companion</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:240px; height:282px; overflow:hidden; background:#000; color:#fff;
+    font-family:Helvetica,Arial,sans-serif; }
+  #app { width:240px; height:282px; position:relative; }
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; }
+  .screen.on { display:flex; }
+  .hdr { height:24px; line-height:24px; padding:0 6px; font-size:12px; font-weight:bold;
+    background:#111; border-bottom:2px solid #f60; white-space:nowrap; overflow:hidden; }
+  .hdr .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#f33; margin-right:5px; }
+  .hdr .dot.live { background:#0c0; }
+  .list { flex:1; overflow:hidden; }
+  .row { min-height:44px; display:flex; align-items:center; padding:0 6px; border-bottom:1px solid #1a1a1a;
+    font-size:13px; gap:6px; }
+  .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:#f60; color:#000;
+    font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center; }
+  .row.sel { background:#fff; color:#000; }
+  .row .txt { flex:1; overflow:hidden; }
+  .row .t1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:bold; }
+  .row .t2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:10px; color:#999; }
+  .row.sel .t2 { color:#555; }
+  .row .fav { font-size:14px; color:#f60; }
+  .tip { height:16px; line-height:16px; font-size:9px; color:#888; text-align:center; background:#0a0a0a; }
+  .qrwrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff; }
+  .qrwrap img { image-rendering:pixelated; }
+  .qrlabel { font-size:10px; color:#000; margin-top:3px; max-width:230px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  .body { flex:1; overflow:hidden; padding:6px; font-size:11px; line-height:1.35; }
+  .body h3 { font-size:11px; color:#f60; margin:5px 0 2px; }
+  .body ul { margin-left:14px; }
+  .body li { margin-bottom:3px; }
+  .center { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column;
+    gap:8px; padding:10px; text-align:center; font-size:12px; color:#aaa; }
+  .spin { width:20px; height:20px; border:3px solid #333; border-top-color:#f60; border-radius:50%;
+    animation:sp .8s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  body.loading .hdr { border-bottom-color:#ff0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen" id="home">
+    <div class="hdr"><span class="dot" id="statusDot"></span>CONF COMPANION</div>
+    <div class="list" id="homeList"></div>
+    <div class="tip">scroll · tap/PTT select</div>
+  </div>
+  <div class="screen" id="qr">
+    <div class="hdr" id="qrHdr">QR</div>
+    <div class="qrwrap"><div id="qrBox"></div><div class="qrlabel" id="qrLabel"></div></div>
+    <div class="tip">hold PTT / swipe → back</div>
+  </div>
+  <div class="screen" id="sched">
+    <div class="hdr">SCHEDULE <span id="schedCount" style="font-weight:normal;color:#888"></span></div>
+    <div class="list" id="schedList"></div>
+    <div class="tip">PTT = open · scroll</div>
+  </div>
+  <div class="screen" id="sess">
+    <div class="hdr" id="sessHdr">SESSION</div>
+    <div class="body" id="sessBody"></div>
+    <div class="list" id="sessList" style="flex:0 0 auto"></div>
+    <div class="tip">PTT select · hold back</div>
+  </div>
+  <div class="screen" id="intel">
+    <div class="hdr">INTEL</div>
+    <div class="body" id="intelBody"><div class="center"><div class="spin"></div><div>Building intel…</div></div></div>
+    <div class="tip">scroll · hold PTT back</div>
+  </div>
+  <div class="screen" id="msg">
+    <div class="hdr" id="msgHdr">INFO</div>
+    <div class="center" id="msgBody"></div>
+    <div class="tip">hold PTT / swipe → back</div>
+  </div>
+</div>
+<script src="qrcode.js"></script>
+<script>
+var BACKEND = location.origin;
+var cfg = { name:'', linkedin:'', landing:'', landingLabel:'', companySummary:'', sessions:[] };
+var devId = null;   // pairing key, generated once, persisted
+var favs = {};            // id -> true
+var curScreen = 'home';
+var selItems = [];        // [{el, fn}]
+var sel = 0;
+var backTo = 'home';
+var intelScroll = 0;
+var expect = null;        // LLM sub-step state machine
+
+// ---------- helpers ----------
+function $(id){ return document.getElementById(id); }
+function show(id){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  $(id).classList.add('on');
+  curScreen = id;
+  if (_dbgPush) _dbgPush('→ '+id);
+}
+function registerList(listEl){
+  selItems = []; sel = 0;
+  listEl.querySelectorAll('.row').forEach(function(r){
+    selItems.push({ el:r, fn:r._fn });
+  });
+  paintSel();
+}
+function paintSel(){
+  selItems.forEach(function(it,i){ it.el.classList.toggle('sel', i===sel); });
+  ensureVis();
+}
+function ensureVis(){
+  if (!selItems.length) return;
+  var row = selItems[sel].el, list = row.parentElement;
+  var rowH = row.offsetHeight || 44;
+  var maxVis = Math.max(1, Math.floor(list.clientHeight / rowH));
+  list.scrollTop = Math.max(0, (sel - Math.floor(maxVis/2)) * rowH);
+}
+var _lastMove = 0;
+function moveSel(d){
+  var n = Date.now(); if (n - _lastMove < 120) return; _lastMove = n;
+  if (curScreen === 'intel'){ // scroll text instead
+    var b = $('intelBody');
+    intelScroll = Math.max(0, intelScroll + d*40);
+    b.scrollTop = intelScroll;
+    return;
+  }
+  if (!selItems.length) return;
+  sel = (sel + d + selItems.length) % selItems.length;
+  paintSel();
+}
+function activate(){
+  if (curScreen === 'qr' || curScreen === 'msg' || curScreen === 'intel'){ goBack(); return; }
+  if (selItems.length && selItems[sel].fn) selItems[sel].fn();
+}
+function goBack(){
+  if (curScreen === 'home') return;
+  if (curScreen === 'sess'){ openSchedule(); return; }
+  if (curScreen === 'intel'){ show(backTo==='sess' ? 'sess' : 'home'); if(curScreen==='sess') registerList($('sessList')); return; }
+  goHome();
+}
+function loading(on){ document.body.classList.toggle('loading', !!on); }
+function fetchT(url, opts, ms){
+  return Promise.race([
+    fetch(url, opts),
+    new Promise(function(_,rej){ setTimeout(function(){ rej(new Error('timeout')); }, ms||8000); })
+  ]);
+}
+// Free-tier host may be asleep (cold start ~30-60s). Try fast, then retry patient.
+function wakeFetch(url, opts, onWaking){
+  return fetchT(url, opts, 8000).catch(function(){
+    if (onWaking) onWaking();
+    return fetchT(url, opts, 75000);
+  });
+}
+function toast(title, text){
+  $('msgHdr').textContent = title;
+  $('msgBody').innerHTML = text;
+  show('msg'); selItems = [];
+}
+
+// ---------- storage ----------
+function saveLocal(){
+  if (!window.creationStorage) return;
+  try {
+    window.creationStorage.plain.setItem('cc_cfg', btoa(unescape(encodeURIComponent(JSON.stringify(cfg)))));
+    window.creationStorage.plain.setItem('cc_favs', btoa(JSON.stringify(favs)));
+  } catch(e){}
+}
+function mkDevId(){
+  var s = 'cc';
+  for (var i=0;i<10;i++) s += 'abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random()*31)];
+  return s;
+}
+async function initDevId(){
+  if (window.creationStorage){
+    try { var v = await window.creationStorage.plain.getItem('cc_dev'); if (v) devId = atob(v); } catch(e){}
+  }
+  if (!devId){
+    devId = mkDevId();
+    if (window.creationStorage){ try { await window.creationStorage.plain.setItem('cc_dev', btoa(devId)); } catch(e){} }
+  }
+}
+async function loadLocal(){
+  if (!window.creationStorage) return;
+  try {
+    var c = await window.creationStorage.plain.getItem('cc_cfg');
+    if (c) cfg = JSON.parse(decodeURIComponent(escape(atob(c))));
+    var f = await window.creationStorage.plain.getItem('cc_favs');
+    if (f) favs = JSON.parse(atob(f));
+  } catch(e){}
+}
+
+// ---------- sync ----------
+function sync(silent){
+  loading(true);
+  return wakeFetch(BACKEND + '/api/config?d=' + devId, {}, function(){
+      if (!silent) toast('WAKING SERVER', 'Free host was asleep.<br>Retrying — up to a minute…');
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      cfg = j; saveLocal();
+      $('statusDot').classList.add('live');
+      if (!silent) toast('SYNCED', (cfg.sessions||[]).length + ' sessions loaded.<br>LinkedIn: ' + (cfg.linkedin?'✓':'—') + ' · Landing: ' + (cfg.landing?'✓':'—') + '<br>Company intel: ' + (cfg.companySummary?'✓':'—'));
+    })
+    .catch(function(e){
+      $('statusDot').classList.remove('live');
+      if (!silent) toast('OFFLINE', 'Could not reach backend.<br>Using saved data.');
+    })
+    .then(function(){ loading(false); if (silent) renderHome(); });
+}
+
+// ---------- screens ----------
+function mkRow(bullet, t1, t2, fn, favMark){
+  var r = document.createElement('div');
+  r.className = 'row';
+  r.innerHTML = '<div class="bullet">' + bullet + '</div><div class="txt"><div class="t1"></div>' +
+    (t2 ? '<div class="t2"></div>' : '') + '</div>' + (favMark ? '<div class="fav">★</div>' : '');
+  r.querySelector('.t1').textContent = t1;
+  if (t2) r.querySelector('.t2').textContent = t2;
+  r._fn = fn;
+  r.addEventListener('click', function(){ sel = selItems.findIndex(function(it){ return it.el===r; }); paintSel(); fn(); });
+  return r;
+}
+function renderHome(){
+  var L = $('homeList'); L.innerHTML = '';
+  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect' : 'not set — open setup', showLinkedIn));
+  L.appendChild(mkRow('◨', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
+  var favN = Object.keys(favs).filter(function(k){ return favs[k]; }).length;
+  L.appendChild(mkRow('S', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
+  L.appendChild(mkRow('i', 'Prospect intel', cfg.companySummary ? 'ready' : 'scan company site in setup', openIntelPick));
+  L.appendChild(mkRow('⛓', 'Pair phone', 'QR → setup on phone', showPairQR));
+  L.appendChild(mkRow('⟳', 'Sync', BACKEND.replace(/^https?:\/\//,''), function(){ sync(false); }));
+  show('home'); registerList(L);
+}
+function renderQR(title, data, label){
+  $('qrHdr').textContent = title;
+  var box = $('qrBox'); box.innerHTML = '';
+  try {
+    var q = window.qrcode(0, 'M'); q.addData(data); q.make();
+    box.innerHTML = q.createImgTag(3, 4);
+  } catch(e){ box.innerHTML = '<div style="color:#000;font-size:11px">QR error</div>'; }
+  $('qrLabel').textContent = label || data;
+  show('qr'); selItems = [];
+}
+function showLinkedIn(){
+  if (!cfg.linkedin) return showPairQR();
+  renderQR('LINKEDIN — ' + (cfg.name||'connect'), cfg.linkedin, cfg.linkedin.replace(/^https?:\/\/(www\.)?/,''));
+}
+function showLanding(){
+  if (!cfg.landing) return toast('SETUP NEEDED', 'Add a landing page URL in setup:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
+  renderQR((cfg.landingLabel||'LANDING').toUpperCase(), cfg.landing, cfg.landing.replace(/^https?:\/\/(www\.)?/,''));
+}
+function showPairQR(){
+  var url = BACKEND + '/setup?d=' + devId;
+  renderQR('PAIR PHONE', url, 'scan → fill in → Sync');
+}
+function openSchedule(){
+  var L = $('schedList'); L.innerHTML = '';
+  var ss = cfg.sessions || [];
+  if (!ss.length){
+    toast('NO SCHEDULE', 'Import the agenda URL from the setup page:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
+    return;
+  }
+  // favorites first
+  var ordered = ss.slice().sort(function(a,b){ return (favs[b.id]?1:0) - (favs[a.id]?1:0); });
+  ordered.forEach(function(s){
+    L.appendChild(mkRow(s.time.split(/[-–]/)[0].replace(/[APMapm\s]/g,'').slice(0,5) || '·',
+      s.title, s.time + (s.speaker ? ' · ' + s.speaker : ''),
+      function(){ openSession(s); }, !!favs[s.id]));
+  });
+  var favN = ordered.filter(function(s){ return favs[s.id]; }).length;
+  $('schedCount').textContent = ss.length + ' · ' + favN + '★';
+  show('sched'); registerList(L);
+}
+function openSession(s){
+  $('sessHdr').textContent = s.time;
+  $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(s.title) + '</b>' +
+    (s.speaker ? '<div style="color:#999;margin-top:3px">' + esc(s.speaker) + '</div>' : '');
+  var L = $('sessList'); L.innerHTML = '';
+  L.appendChild(mkRow('★', favs[s.id] ? 'Unfavorite' : 'Favorite', null, function(){
+    favs[s.id] = !favs[s.id]; saveLocal(); openSession(s);
+  }, !!favs[s.id]));
+  L.appendChild(mkRow('i', 'Intel on this prospect', s.speaker || 'speaker/company', function(){ runIntel(s); }));
+  show('sess'); registerList(L);
+}
+function esc(s){ var d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+
+// ---------- intel ----------
+function openIntelPick(){
+  if (!cfg.companySummary) return toast('SETUP NEEDED', 'Scan YOUR company site first (setup page) so intel knows what you sell.');
+  if (!(cfg.sessions||[]).length) return toast('NO SCHEDULE', 'Import a schedule first — intel targets a session speaker.');
+  openSchedule(); // pick a session, then choose Intel inside
+  toast('PICK A SESSION', 'Open a session from the schedule,<br>then choose <b>Intel on this prospect</b>.');
+}
+function runIntel(s){
+  backTo = 'sess';
+  intelScroll = 0;
+  $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Building intel…</div></div>';
+  show('intel'); selItems = [];
+  loading(true);
+  wakeFetch(BACKEND + '/api/intel', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ d: devId, prospect: (s.speaker||'') + ' — session: ' + s.title })
+  }, function(){ $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Waking server…<br>up to a minute</div></div>'; })
+  .then(function(r){ return r.json(); })
+  .then(function(j){
+    loading(false);
+    var prompt = 'I work in sales. MY COMPANY (what we sell): """' + (j.myCompany||'').slice(0,1800) + '""". ' +
+      'PROSPECT I am about to talk to at a conference: "' + (j.prospect||'') + '"' +
+      (j.prospectText ? '. Their site says: """' + j.prospectText.slice(0,1200) + '"""' : '') +
+      '. Give me conversation intel. Respond ONLY with valid JSON: {"who":"1 line on who they likely are","angle":"1-2 lines: why MY product is relevant to them","openers":["q1","q2","q3"],"avoid":"1 thing not to say"}';
+    if (typeof PluginMessageHandler !== 'undefined'){
+      expect = 'intel';
+      PluginMessageHandler.postMessage(JSON.stringify({ message: prompt, useLLM: true, wantsR1Response: false }));
+      setTimeout(function(){ if (expect==='intel'){ expect=null; renderIntelFallback(j); } }, 25000);
+    } else {
+      renderIntelFallback(j);
+    }
+  })
+  .catch(function(e){ loading(false); $('intelBody').innerHTML = '<div class="center">Backend unreachable.<br>' + esc(e.message) + '</div>'; });
+}
+function renderIntel(o){
+  $('intelBody').innerHTML =
+    '<h3>WHO</h3><div>' + esc(o.who) + '</div>' +
+    '<h3>YOUR ANGLE</h3><div>' + esc(o.angle) + '</div>' +
+    '<h3>OPENERS</h3><ul>' + (o.openers||[]).map(function(q){ return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>' +
+    (o.avoid ? '<h3>AVOID</h3><div>' + esc(o.avoid) + '</div>' : '');
+  $('intelBody').style.overflow = 'hidden';
+}
+function renderIntelFallback(j){
+  $('intelBody').innerHTML =
+    '<h3>PROSPECT</h3><div>' + esc(j.prospect) + '</div>' +
+    '<h3>YOUR PITCH BASE</h3><div>' + esc((j.myCompany||'').slice(0,600)) + '</div>' +
+    '<div style="color:#666;margin-top:6px">(LLM unavailable — raw context shown)</div>';
+}
+window.onPluginMessage = function(data){
+  if (expect === 'intel'){
+    expect = null;
+    var payload = data.data || data.message || '';
+    try {
+      var m = String(payload).match(/\{[\s\S]*\}/);
+      renderIntel(JSON.parse(m ? m[0] : payload));
+    } catch(e){
+      $('intelBody').innerHTML = '<h3>INTEL</h3><div>' + esc(String(data.message||payload).slice(0,900)) + '</div>';
+    }
+  }
+};
+
+// ---------- hardware ----------
+var _lastClick = 0;
+function _clickGuard(){ var n=Date.now(); if(n-_lastClick<150) return false; _lastClick=n; return true; }
+function onSide(){ if(_clickGuard()) activate(); }
+window.addEventListener('sideClick', onSide);
+window.addEventListener('sideButton', onSide);
+window.addEventListener('scrollUp', function(){ moveSel(-1); });
+window.addEventListener('scrollDown', function(){ moveSel(1); });
+window.addEventListener('scrollWheel', function(e){ moveSel((e.detail&&e.detail.direction==='down')||e.deltaY>0?1:-1); });
+window.addEventListener('wheel', function(e){ moveSel(e.deltaY<0?-1:1); }, {passive:true});
+window.addEventListener('longPressStart', function(){ goBack(); });
+window.addEventListener('keydown', function(e){ if(e.key==='Enter') activate(); if(e.key==='Escape') goBack();
+  if(e.key==='ArrowUp') moveSel(-1); if(e.key==='ArrowDown') moveSel(1); });
+var _touchX = null;
+window.addEventListener('touchstart', function(e){ _touchX = e.touches[0].clientX; }, {passive:true});
+window.addEventListener('touchend', function(e){
+  if (_touchX !== null && e.changedTouches[0].clientX - _touchX > 60) goBack();
+  _touchX = null;
+}, {passive:true});
+
+// ---------- #debug overlay ----------
+var DEBUG = /[#&?]debug/.test(location.href);
+var _dbgPush = null;
+if (DEBUG){
+  var dbg = document.createElement('div');
+  dbg.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;font:9px monospace;color:#0f0;background:rgba(0,0,0,.6);padding:1px 3px;white-space:nowrap;overflow:hidden;';
+  document.body.appendChild(dbg);
+  var _dbgLog = [];
+  _dbgPush = function(s){ _dbgLog.push(s); if(_dbgLog.length>4) _dbgLog.shift(); dbg.textContent='['+curScreen+'] '+_dbgLog.join(' · '); };
+  ['scrollUp','scrollDown','scrollWheel','sideClick','sideButton','longPressStart','longPressEnd','click','touchend','keydown','wheel']
+    .forEach(function(ev){ window.addEventListener(ev, function(){ _dbgPush('EVT '+ev); }); });
+  window.addEventListener('error', function(e){ _dbgPush('ERR '+e.message); });
+}
+
+function goHome(){ renderHome(); }
+
+// ---------- boot ----------
+async function boot(){
+  await initDevId();
+  await loadLocal();
+  renderHome();
+  sync(true);
+}
+boot();
+</script>
+</body>
+</html>

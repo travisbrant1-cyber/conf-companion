@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" id="manifestLink" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ConfComp">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#ff6600">
+<title>Conf Companion — Setup</title>
+<style>
+  body { font-family:Helvetica,Arial,sans-serif; background:#111; color:#eee; max-width:520px;
+    margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:20px; color:#f60; }
+  h2 { font-size:14px; margin:26px 0 8px; border-bottom:1px solid #333; padding-bottom:4px; }
+  label { display:block; font-size:12px; color:#999; margin:10px 0 3px; }
+  input { width:100%; padding:10px; border:1px solid #444; background:#000; color:#fff;
+    border-radius:6px; font-size:14px; }
+  button { margin-top:10px; padding:10px 18px; background:#f60; color:#000; border:none;
+    border-radius:6px; font-weight:bold; font-size:14px; }
+  button:disabled { opacity:.5; }
+  .out { font-size:12px; color:#8f8; margin-top:8px; white-space:pre-wrap; }
+  .out.err { color:#f66; }
+  .sess { font-size:12px; padding:6px 8px; border-bottom:1px solid #222; }
+  .sess b { color:#f60; }
+  .banner { background:#222; border:1px solid #f60; border-radius:8px; padding:10px 12px;
+    font-size:13px; margin:14px 0; }
+  .banner b { color:#f60; }
+  .pill { font-size:11px; color:#0c0; background:#052; border-radius:10px; padding:2px 8px; }
+</style>
+</head>
+<body>
+<h1>Conf Companion — Setup</h1>
+<p style="font-size:13px;color:#888">Fill this in from your phone/PC. The R1 pulls it on Sync.
+  <span class="pill" id="pairPill" style="display:none"></span></p>
+<div class="banner" id="a2hs" style="display:none">
+  📌 <b>Save this page:</b> add it to your home screen so your conference setup is one tap away.<br>
+  <span style="color:#999;font-size:12px" id="a2hsHow"></span>
+</div>
+
+<h2>Networking</h2>
+<label>Your name (shown on QR screen)</label><input id="name">
+<label>LinkedIn profile URL</label><input id="linkedin" placeholder="https://www.linkedin.com/in/you">
+<label>Landing page URL (optional)</label><input id="landing" placeholder="https://yourco.com/demo">
+<label>Landing page label</label><input id="landingLabel" placeholder="Product demo">
+<button onclick="saveBasic()">Save</button>
+<div class="out" id="outBasic"></div>
+
+<h2>Conference schedule</h2>
+<label>Agenda page URL</label><input id="scheduleUrl" placeholder="https://conf.example.com/agenda">
+<button onclick="importSchedule()" id="btnSched">Import schedule</button>
+<div class="out" id="outSched"></div>
+<div id="sessPreview"></div>
+
+<h2>Your company (intel base)</h2>
+<label>Company website URL</label><input id="companyUrl" placeholder="https://yourco.com">
+<button onclick="scanCompany()" id="btnCo">Scan site</button>
+<div class="out" id="outCo"></div>
+
+<script>
+function $(id){ return document.getElementById(id); }
+var DEV = new URLSearchParams(location.search).get('d') || localStorage.getItem('cc_dev') || '';
+if (DEV){
+  localStorage.setItem('cc_dev', DEV);
+  // keep ?d= in the URL so Add-to-Home-Screen bookmarks the paired page
+  if (!location.search.includes('d=')) history.replaceState(null,'', '/setup?d='+DEV);
+  var pill = $('pairPill') || document.getElementById('pairPill');
+  document.getElementById('pairPill').style.display='inline';
+  document.getElementById('pairPill').textContent = 'paired: '+DEV;
+  document.getElementById('manifestLink').href = '/manifest.json?d='+DEV;
+}
+// Add-to-home-screen prompt
+(function(){
+  var deferred = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault(); deferred = e;
+    var b = document.getElementById('a2hs'); b.style.display='block';
+    document.getElementById('a2hsHow').innerHTML = '<button onclick="window.__a2hs()">Add to home screen</button>';
+    window.__a2hs = function(){ deferred.prompt(); };
+  });
+  var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (!standalone){
+    var b = document.getElementById('a2hs'); b.style.display='block';
+    document.getElementById('a2hsHow').textContent = isIOS
+      ? 'iPhone: tap Share ▸ Add to Home Screen.'
+      : 'Android: menu ⋮ ▸ Add to Home screen.';
+  }
+})();
+function out(id, msg, err){ var e=$(id); e.textContent=msg; e.className='out'+(err?' err':''); }
+async function api(path, body){
+  var sep = path.includes('?') ? '&' : '?';
+  var url = DEV ? path + sep + 'd=' + encodeURIComponent(DEV) : path;
+  if (body && DEV) body.d = DEV;
+  var opts = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) } : {};
+  var r;
+  try {
+    var ctl = new AbortController(); var t = setTimeout(function(){ ctl.abort(); }, 8000);
+    r = await fetch(url, Object.assign({signal:ctl.signal}, opts)); clearTimeout(t);
+  } catch(e){
+    // cold start — retry patiently
+    document.title = 'Waking server…';
+    r = await fetch(url, opts);
+    document.title = 'Conf Companion — Setup';
+  }
+  var j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+// Durable backup: mirror config in phone localStorage; re-push if server lost it (free-tier disk resets).
+function backupLocal(c){ try { localStorage.setItem('cc_backup', JSON.stringify(c)); } catch(e){} }
+async function restoreIfEmpty(c){
+  var empty = !c.name && !c.linkedin && !(c.sessions||[]).length && !c.companySummary;
+  if (!empty) return c;
+  try {
+    var b = JSON.parse(localStorage.getItem('cc_backup') || 'null');
+    if (b && (b.name || b.linkedin || (b.sessions||[]).length)){
+      await api('/api/config', Object.assign({}, b));
+      out('outBasic', 'Server had reset — restored your saved setup from this phone ✓');
+      return b;
+    }
+  } catch(e){}
+  return c;
+}
+async function load(){
+  try {
+    var c = await api('/api/config');
+    c = await restoreIfEmpty(c);
+    backupLocal(c);
+    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    if ((c.sessions||[]).length) preview(c.sessions);
+    if (c.companySummary) out('outCo', 'Company intel saved (' + c.companySummary.length + ' chars).');
+  } catch(e){}
+}
+async function saveBasic(){
+  try {
+    await api('/api/config', { name:$('name').value.trim(), linkedin:$('linkedin').value.trim(),
+      landing:$('landing').value.trim(), landingLabel:$('landingLabel').value.trim() });
+    var c = await api('/api/config'); backupLocal(c);
+    out('outBasic', 'Saved ✓ — hit Sync on the R1.');
+  } catch(e){ out('outBasic', 'Error: '+e.message, 1); }
+}
+function preview(ss){
+  $('sessPreview').innerHTML = ss.slice(0,50).map(function(s){
+    return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
+  }).join('');
+}
+async function importSchedule(){
+  var u = $('scheduleUrl').value.trim();
+  if (!u) return out('outSched','Enter a URL',1);
+  $('btnSched').disabled = true; out('outSched','Fetching + parsing…');
+  try {
+    var j = await api('/api/schedule', { url:u });
+    if (j.sessions.length){ out('outSched', j.sessions.length + ' sessions extracted ✓'); preview(j.sessions);
+      var c = await api('/api/config'); backupLocal(c); }
+    else out('outSched', 'No time-pattern sessions found on that page. Try the printable/simple agenda URL.', 1);
+  } catch(e){ out('outSched','Error: '+e.message,1); }
+  $('btnSched').disabled = false;
+}
+async function scanCompany(){
+  var u = $('companyUrl').value.trim();
+  if (!u) return out('outCo','Enter a URL',1);
+  $('btnCo').disabled = true; out('outCo','Scanning…');
+  try {
+    var j = await api('/api/extract', { url:u, save:'company' });
+    out('outCo', 'Saved ✓ ('+j.text.length+' chars). Preview:\n' + j.text.slice(0,300) + '…');
+    var c = await api('/api/config'); backupLocal(c);
+  } catch(e){ out('outCo','Error: '+e.message,1); }
+  $('btnCo').disabled = false;
+}
+load();
+</script>
+</body>
+</html>
