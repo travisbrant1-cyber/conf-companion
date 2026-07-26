@@ -18,7 +18,7 @@ function devPath(id) {
 }
 function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
-  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], rev: 0 }; }
+  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, rev: 0 }; }
 }
 function saveConfig(id, cfg) { fs.writeFileSync(devPath(id), JSON.stringify(cfg, null, 2)); }
 
@@ -198,7 +198,10 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const id = body.d || qd;
       delete body.d;
-      const cfg = { ...loadConfig(id), ...body };
+      const prev = loadConfig(id);
+      // Merge favorites from phone + R1 rather than overwriting (cross-device favs).
+      if (body.favs && prev.favs) body.favs = Object.assign({}, prev.favs, body.favs);
+      const cfg = { ...prev, ...body };
       cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
       return send(res, 200, { ok: true, rev: cfg.rev });
@@ -246,13 +249,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/manifest.json') {
       return send(res, 200, JSON.stringify({
         name: 'Conf Companion', short_name: 'ConfComp',
-        start_url: '/setup' + (qd ? '?d=' + qd : ''),
+        start_url: '/phone' + (qd ? '?d=' + qd : ''),
         display: 'standalone', background_color: '#111111', theme_color: '#ff6600',
         icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }]
       }), 'application/manifest+json');
     }
     let fp = null;
-    if (p === '/' || p === '/setup') fp = path.join(ROOT, 'setup.html');
+    if (p === '/' || p === '/phone' || p === '/phone/') fp = path.join(ROOT, 'phone.html');
+    else if (p === '/setup') fp = path.join(ROOT, 'setup.html');
     else if (p === '/icon-192.png') fp = path.join(ROOT, 'icon-192.png');
     else if (p === '/r1' || p === '/r1/') fp = path.join(ROOT, 'r1', 'index.html');
     else if (p.startsWith('/r1/')) fp = path.join(ROOT, 'r1', p.slice(4).replace(/\.\./g, ''));

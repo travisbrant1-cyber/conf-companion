@@ -271,6 +271,9 @@ function sync(silent){
       var newRev = revOf(j);
       var changed = newRev !== cfgRev;
       cfg = j; cfgRev = newRev;
+      // adopt server-side favorites (phone can favorite too) — local wins if present
+      try { var sf = (j.favs && typeof j.favs === 'object') ? j.favs : {};
+        for (var _k in sf) if (!Object.prototype.hasOwnProperty.call(favs, _k)) favs[_k] = sf[_k]; } catch(e){}
       try { store().setItem('cc_rev', btoa(String(cfgRev))); } catch(e){}
       saveLocal();
       $('statusDot').classList.add('live');
@@ -282,6 +285,13 @@ function sync(silent){
       if (!silent) toast('OFFLINE', 'Could not reach backend.<br>Using saved data.');
     })
     .then(function(){ loading(false); if (silent) renderHome(); });
+}
+// Push favorites back to server so phone mirror adopts them too.
+function pushFavs(){
+  try { wakeFetch(BACKEND + '/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ d: devId, favs: favs })
+  }).catch(function(){}); } catch(e){}
 }
 // Phone-driven auto-sync: poll the backend rev every 20s; pull if the phone bumped it.
 function startAutoSync(){
@@ -470,7 +480,7 @@ function openSession(s){
     (s.desc ? '<div style="color:#777;font-size:10px;margin-top:4px">' + esc(s.desc.slice(0,220)) + '</div>' : '');
   var L = $('sessList'); L.innerHTML = '';
   L.appendChild(mkRow('★', favs[s.id] ? 'Unfavorite' : 'Favorite', null, function(){
-    favs[s.id] = !favs[s.id]; saveLocal(); openSession(s);
+    favs[s.id] = !favs[s.id]; saveLocal(); pushFavs(); openSession(s);
   }, !!favs[s.id]));
   L.appendChild(mkRow('i', 'Intel on this prospect', s.speaker || 'speaker/company', function(){ runIntel(s); }));
   show('sess'); registerList(L);
