@@ -42,7 +42,7 @@
 
 <h2>Networking</h2>
 <label>Your name (shown on QR screen)</label><input id="name">
-<label>LinkedIn profile URL</label><input id="linkedin" placeholder="www.linkedin.com/in/you">
+<label>LinkedIn handle (no spaces) — we add ?fromQR=1</label><input id="linkedin" placeholder="travis-brant">
 <label>Landing page URL (optional)</label><input id="landing" placeholder="yourco.com/demo">
 <label>Landing page label</label><input id="landingLabel" placeholder="Product demo">
 
@@ -80,10 +80,24 @@ function normalizeUrl(v){
   if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
   return v.replace(/\s+/g,'');
 }
-['linkedin','landing','scheduleUrl','companyUrl'].forEach(function(id){
+// LinkedIn is a handle (travis-brant) or any linkedin.com URL -> canonical https://www.linkedin.com/<handle>
+function normalizeLinkedIn(v){
+  v = (v||'').trim().replace(/^@/,'').replace(/\/+$/,'');
+  if (!v) return '';
+  var m = v.match(/linkedin\.com\/(?:in\/|pub\/)?([^\/\?\s]+)/i);
+  var handle = m ? m[1] : v.replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\?.*/,'');
+  handle = handle.replace(/^\//,'').replace(/\/+$/,'');
+  if (!handle) return '';
+  return 'https://www.linkedin.com/' + handle;
+}
+['landing','scheduleUrl','companyUrl'].forEach(function(id){
   var el = $(id);
   if (el) el.addEventListener('blur', function(){ el.value = normalizeUrl(el.value); });
 });
+(function(){
+  var el = $('linkedin');
+  if (el) el.addEventListener('blur', function(){ el.value = normalizeLinkedIn(el.value); });
+})();
 // Add-to-home-screen prompt
 (function(){
   var deferred = null;
@@ -150,7 +164,7 @@ async function load(){
 async function saveAll(){
   var payload = {
     name: $('name').value.trim(),
-    linkedin: normalizeUrl($('linkedin').value.trim()),
+    linkedin: normalizeLinkedIn($('linkedin').value.trim()),
     landing: normalizeUrl($('landing').value.trim()),
     landingLabel: $('landingLabel').value.trim(),
     scheduleUrl: normalizeUrl($('scheduleUrl').value.trim()),

@@ -186,6 +186,31 @@ function wakeFetch(url, opts, onWaking){
     return fetchT(url, opts, 75000);
   });
 }
+// ---------- wake / countdown UI ----------
+var _wakeTimers = [];
+function clearTimers(){ _wakeTimers.forEach(clearInterval); _wakeTimers = []; }
+function startCountdown(hostEl, sec){
+  clearTimers();
+  var cd = document.createElement('div');
+  cd.style.cssText = 'font-size:26px;font-weight:bold;color:#f60;margin-top:8px';
+  cd.textContent = sec;
+  var note = document.createElement('div');
+  note.style.cssText = 'font-size:10px;color:#888';
+  note.textContent = 'seconds — waking free host';
+  hostEl.appendChild(cd); hostEl.appendChild(note);
+  var t = setInterval(function(){
+    sec--;
+    if (cd) cd.textContent = sec > 0 ? sec : '…';
+    if (sec <= 0 && note) note.textContent = 'still waking — almost there';
+  }, 1000);
+  _wakeTimers.push(t);
+}
+function wakeStart(sec){
+  $('msgHdr').textContent = 'WAKING SERVER';
+  $('msgBody').innerHTML = '<div class="spin"></div><div style="margin-top:8px">Free host was asleep.</div>';
+  show('msg'); selItems = [];
+  startCountdown($('msgBody'), sec);
+}
 function toast(title, text){
   $('msgHdr').textContent = title;
   $('msgBody').innerHTML = text;
@@ -238,10 +263,11 @@ function revOf(c){ return c && typeof c.rev === 'number' ? c.rev : 0; }
 function sync(silent){
   loading(true);
   return wakeFetch(BACKEND + '/api/config?d=' + devId, {}, function(){
-      if (!silent) toast('WAKING SERVER', 'Free host was asleep.<br>Retrying — up to a minute…');
+      wakeStart(60);
     })
     .then(function(r){ return r.json(); })
     .then(function(j){
+      clearTimers();
       var newRev = revOf(j);
       var changed = newRev !== cfgRev;
       cfg = j; cfgRev = newRev;
@@ -251,6 +277,7 @@ function sync(silent){
       if (!silent || changed) toast('SYNCED', (cfg.sessions||[]).length + ' sessions loaded.<br>LinkedIn: ' + (cfg.linkedin?'✓':'—') + ' · Landing: ' + (cfg.landing?'✓':'—') + '<br>Company intel: ' + (cfg.companySummary?'✓':'—'));
     })
     .catch(function(e){
+      clearTimers();
       $('statusDot').classList.remove('live');
       if (!silent) toast('OFFLINE', 'Could not reach backend.<br>Using saved data.');
     })
@@ -283,8 +310,7 @@ function mkRow(bullet, t1, t2, fn, favMark){
 }
 function renderHome(){
   var L = $('homeList'); L.innerHTML = '';
-  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect' : 'not set — scan yours', showLinkedIn));
-  L.appendChild(mkRow('📷', 'Scan my LinkedIn', 'from phone QR (search ▸ QR)', startScan));
+  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect (?fromQR=1)' : 'add handle on phone (Pair)', showLinkedIn));
   L.appendChild(mkRow('◨', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
   var favN = Object.keys(favs).filter(function(k){ return favs[k]; }).length;
   L.appendChild(mkRow('S', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
@@ -303,9 +329,16 @@ function renderQR(title, data, label){
   $('qrLabel').textContent = label || data;
   show('qr'); selItems = [];
 }
+// Build the LinkedIn in-app deep link: https://www.linkedin.com/<handle>?fromQR=1
+function liDeepLink(raw){
+  if (!raw) return '';
+  var base = raw.replace(/\?.*/,'').replace(/\/+$/,'');
+  return base + '?fromQR=1';
+}
 function showLinkedIn(){
   if (!cfg.linkedin) return showPairQR();
-  renderQR('LINKEDIN — ' + (cfg.name||'connect'), cfg.linkedin, cfg.linkedin.replace(/^https?:\/\/(www\.)?/,''));
+  var link = liDeepLink(cfg.linkedin);
+  renderQR('LINKEDIN — ' + (cfg.name||'connect'), link, link.replace(/^https?:\/\/(www\.)?/,''));
 }
 function showLanding(){
   if (!cfg.landing) return toast('SETUP NEEDED', 'Add a landing page URL in setup:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
@@ -460,11 +493,12 @@ function runIntel(s){
   wakeFetch(BACKEND + '/api/intel', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ d: devId, prospect: (s.speaker||'') + ' — session: ' + s.title })
-  }, function(){ $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Waking server…<br>up to a minute</div></div>'; })
+  }, function(){ $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Waking server…<br>up to a minute</div></div>'; startCountdown($('intelBody'), 60); })
   .then(function(r){ return r.json(); })
   .then(function(j){
+    clearTimers();
     loading(false);
-    var prompt = 'I work in sales. MY COMPANY (what we sell): """' + (j.myCompany||'').slice(0,1800) + '""". ' +
+    var prompt = 'I work in sales. MY COMPANY (what we sell): """' + (j.myCompany||'').slice(0,1800) + '"""' +
       'PROSPECT I am about to talk to at a conference: "' + (j.prospect||'') + '"' +
       (j.prospectText ? '. Their site says: """' + j.prospectText.slice(0,1200) + '"""' : '') +
       '. Give me conversation intel. Respond ONLY with valid JSON: {"who":"1 line on who they likely are","angle":"1-2 lines: why MY product is relevant to them","openers":["q1","q2","q3"],"avoid":"1 thing not to say"}';
@@ -476,7 +510,7 @@ function runIntel(s){
       renderIntelFallback(j);
     }
   })
-  .catch(function(e){ loading(false); $('intelBody').innerHTML = '<div class="center">Backend unreachable.<br>' + esc(e.message) + '</div>'; });
+  .catch(function(e){ clearTimers(); loading(false); $('intelBody').innerHTML = '<div class="center">Backend unreachable.<br>' + esc(e.message) + '</div>'; });
 }
 function renderIntel(o){
   $('intelBody').innerHTML =
