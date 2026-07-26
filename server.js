@@ -1,6 +1,7 @@
 // Conference Companion backend — zero-dependency Node server
 // Serves: /r1/ (creation), /setup (phone config page), /api/* (config, schedule extract, site intel scrape)
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
@@ -85,32 +86,61 @@ async function pinPublicUrl(url, depth) {
   }
   return { ip, host, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, proto: u.protocol };
 }
-function assertPublicUrl(url, depth) { return pinPublicUrl(url, depth || 0); }
+// Issue the actual request against the pinned IP (never the hostname), so DNS
+// cannot change between validation and connection. `Host`/SNI still use the
+// real hostname so virtual-hosted sites and TLS cert checks work correctly.
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+function fetchPinned(pinned, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const lib = pinned.proto === 'https:' ? https : http;
+    const opts = {
+      host: pinned.ip,
+      port: pinned.port,
+      path: pinned.path,
+      method: 'GET',
+      timeout: timeoutMs,
+      headers: {
+        'Host': pinned.host,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ConfCompanion/1.0',
+        'Accept': 'text/html,application/xhtml+xml'
+      }
+    };
+    if (lib === https) opts.servername = pinned.host; // SNI + cert hostname check against the real name
+    const req = lib.request(opts, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400) {
+        res.resume();
+        return resolve({ redirectTo: res.headers.location });
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        return reject(new Error('HTTP ' + res.statusCode));
+      }
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_RESPONSE_BYTES) { req.destroy(new Error('response too large')); return; }
+        chunks.push(c);
+      });
+      res.on('end', () => resolve({ text: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.end();
+  });
+}
 // Fetch HTML via IP-pinned connection, manually following + re-validating redirects.
 async function fetchHtml(url, timeoutMs = 12000, depth = 0) {
   const pinned = await pinPublicUrl(url, depth);
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, {
-      signal: ctl.signal,
-      redirect: 'manual', // we follow + re-validate ourselves
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ConfCompanion/1.0',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Host': pinned.host // connect by resolved IP but keep the real Host
-      }
-    });
-    if (r.status >= 300 && r.status < 400) {
-      const loc = r.headers.get('location');
-      if (!loc) throw new Error('redirect with no Location');
-      // Re-validate the next hop (absolute or relative) before following.
-      const next = loc.startsWith('http') ? loc : (pinned.proto + '//' + pinned.host + (loc.startsWith('/') ? loc : '/' + loc));
-      return fetchHtml(next, timeoutMs, depth + 1);
-    }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return await r.text();
-  } finally { clearTimeout(t); }
+  const r = await fetchPinned(pinned, timeoutMs);
+  if (r.redirectTo !== undefined) {
+    if (!r.redirectTo) throw new Error('redirect with no Location');
+    // Re-validate + re-resolve + re-pin the next hop (absolute or relative) before following.
+    const next = r.redirectTo.startsWith('http') ? r.redirectTo
+      : (pinned.proto + '//' + pinned.host + (r.redirectTo.startsWith('/') ? r.redirectTo : '/' + r.redirectTo));
+    return fetchHtml(next, timeoutMs, depth + 1);
+  }
+  return r.text;
 }
 
 function htmlToText(html) {
