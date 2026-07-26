@@ -20,10 +20,39 @@ function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
   catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, rev: 0 }; }
 }
-function saveConfig(id, cfg) { fs.writeFileSync(devPath(id), JSON.stringify(cfg, null, 2)); }
+function saveConfig(id, cfg) {
+  // Anti disk-fill: bound both the number of device files and their size.
+  const MAX_DEVICES = 2000, MAX_BYTES = 200 * 1024;
+  const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+  if (files.length >= MAX_DEVICES && !fs.existsSync(devPath(id))) {
+    throw new Error('device limit reached');
+  }
+  const s = JSON.stringify(cfg, null, 2);
+  if (Buffer.byteLength(s) > MAX_BYTES) throw new Error('config too large');
+  fs.writeFileSync(devPath(id), s);
+}
 
-// ---------- SSRF guard: only allow http(s) to public hosts ----------
-// Blocks file:, localhost, link-local (169.254.169.254), loopback, and private ranges.
+// Security note — accepted tradeoff (per Claude review of commit 65d74bb):
+// Device id ("cc" + 10 chars, ~31^10) is the ONLY credential and travels in the
+// URL + as a pairing QR. CORS is wide open (Access-Control-Allow-Origin: *) so the
+// phone/R1 pages can call the API from any origin. The id space is too large to
+// brute-force, but a leaked id (browser history, screenshot of the QR, Referer
+// header) grants unauthenticated read/write of that user's data from any origin.
+// This is intentional for a zero-account companion app; don't add sensitive
+// secrets (passwords, tokens) to the stored config.
+
+// ---------- SSRF guard ----------
+// Two classic holes this closes at once:
+//  (a) Redirect bypass: fetch({redirect:'follow'}) re-validates NOTHING on the
+//      hop, so a 302 to http://169.254.169.254/ (cloud metadata) or
+//      http://localhost:<port>/api/config slips past a one-time URL check.
+//  (b) DNS-rebinding TOCTOU: resolving in the guard then letting fetch() resolve
+//      again lets a low-TTL host answer the check with a public IP and the
+//      connection with 127.0.0.1. We resolve ONCE and connect to that IP.
+// Fix for both: resolve the hostname ourselves, then fetch by connecting to the
+// resolved public IP with the original Host header. Redirects are followed
+// 'manual'ly and EVERY Location is re-checked (and re-resolved+pinned) with a
+// hard hop cap. Only http(s) to public IPs is ever touched.
 function isPrivateIp(ip) {
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split('.').map(Number);
@@ -37,31 +66,48 @@ function isPrivateIp(ip) {
   }
   return false;
 }
-async function assertPublicUrl(url) {
+// Resolve + validate a URL once; return { ip, host, port, path, proto } pinned to a public IP.
+async function pinPublicUrl(url, depth) {
+  if (depth > 5) throw new Error('too many redirects');
   let u;
   try { u = new URL(url); } catch (e) { throw new Error('invalid URL'); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('only http(s) allowed');
   const host = u.hostname;
-  // direct IP literal
-  if (net.isIP(host)) { if (isPrivateIp(host)) throw new Error('private address blocked'); return; }
-  // resolve hostname (incl. IPv6) and reject if any resolution is private
-  let addrs;
-  try { addrs = await dns.lookup(host, { all: true }); }
-  catch (e) { throw new Error('DNS resolution failed'); }
-  for (const a of addrs) if (isPrivateIp(a.address)) throw new Error('private address blocked');
+  let ip;
+  if (net.isIP(host)) {
+    ip = host;
+    if (isPrivateIp(ip)) throw new Error('private address blocked');
+  } else {
+    const addrs = await dns.lookup(host, { all: true });
+    const pub = addrs.map(a => a.address).filter(a => !isPrivateIp(a));
+    if (!pub.length) throw new Error('host resolves only to private/blocked addresses');
+    ip = pub[0]; // pin to one public resolution for the whole connection
+  }
+  return { ip, host, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, proto: u.protocol };
 }
-
-// ---------- HTML fetching + cleaning ----------
-async function fetchHtml(url, timeoutMs = 12000) {
-  await assertPublicUrl(url);
+function assertPublicUrl(url, depth) { return pinPublicUrl(url, depth || 0); }
+// Fetch HTML via IP-pinned connection, manually following + re-validating redirects.
+async function fetchHtml(url, timeoutMs = 12000, depth = 0) {
+  const pinned = await pinPublicUrl(url, depth);
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const r = await fetch(url, {
       signal: ctl.signal,
-      redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ConfCompanion/1.0', 'Accept': 'text/html,application/xhtml+xml' }
+      redirect: 'manual', // we follow + re-validate ourselves
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ConfCompanion/1.0',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Host': pinned.host // connect by resolved IP but keep the real Host
+      }
     });
+    if (r.status >= 300 && r.status < 400) {
+      const loc = r.headers.get('location');
+      if (!loc) throw new Error('redirect with no Location');
+      // Re-validate the next hop (absolute or relative) before following.
+      const next = loc.startsWith('http') ? loc : (pinned.proto + '//' + pinned.host + (loc.startsWith('/') ? loc : '/' + loc));
+      return fetchHtml(next, timeoutMs, depth + 1);
+    }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return await r.text();
   } finally { clearTimeout(t); }
@@ -178,7 +224,7 @@ function send(res, code, body, type) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let d = '';
-    req.on('data', c => { d += c; if (d.length > 1e6) req.destroy(); });
+    req.on('data', c => { d += c; if (d.length > 1e6) { req.destroy(); reject(new Error('body too large')); } });
     req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
