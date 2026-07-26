@@ -11,33 +11,70 @@
 <meta name="theme-color" content="#ff6600">
 <title>Conf Companion — Setup</title>
 <style>
+  :root { --accent: #ff6600; }
   body { font-family:Helvetica,Arial,sans-serif; background:#111; color:#eee; max-width:520px;
     margin:0 auto; padding:20px 16px 60px; }
-  h1 { font-size:20px; color:#f60; }
+  h1 { font-size:20px; color:var(--accent); }
   h2 { font-size:14px; margin:26px 0 8px; border-bottom:1px solid #333; padding-bottom:4px; }
   label { display:block; font-size:12px; color:#999; margin:10px 0 3px; }
   input { width:100%; padding:10px; border:1px solid #444; background:#000; color:#fff;
     border-radius:6px; font-size:14px; }
-  button { margin-top:10px; padding:10px 18px; background:#f60; color:#000; border:none;
+  input[type=color] { width:60px; height:40px; padding:2px; cursor:pointer; }
+  button { margin-top:10px; padding:10px 18px; background:var(--accent); color:#000; border:none;
     border-radius:6px; font-weight:bold; font-size:14px; }
   button:disabled { opacity:.5; }
   .out { font-size:12px; color:#8f8; margin-top:8px; white-space:pre-wrap; }
   .out.err { color:#f66; }
   .sess { font-size:12px; padding:6px 8px; border-bottom:1px solid #222; }
-  .sess b { color:#f60; }
-  .banner { background:#222; border:1px solid #f60; border-radius:8px; padding:10px 12px;
+  .sess b { color:var(--accent); }
+  .banner { background:#222; border:1px solid var(--accent); border-radius:8px; padding:10px 12px;
     font-size:13px; margin:14px 0; }
-  .banner b { color:#f60; }
+  .banner b { color:var(--accent); }
   .pill { font-size:11px; color:#0c0; background:#052; border-radius:10px; padding:2px 8px; }
+  .swatch-row { display:flex; align-items:center; gap:10px; }
+  .swatch-row .hint { font-size:12px; color:#888; }
+  .swatches { display:flex; gap:8px; flex-wrap:wrap; }
+  .swatch { width:32px; height:32px; border-radius:6px; border:2px solid #444; cursor:pointer; padding:0; }
+  .swatch:hover { border-color:#888; }
 </style>
 </head>
 <body>
 <h1>Conf Companion — Setup</h1>
 <p style="font-size:13px;color:#888">Fill this in from your phone/PC. The R1 pulls it on Sync.
   <span class="pill" id="pairPill" style="display:none"></span></p>
+<button onclick="viewPhone()" style="background:#333;color:#fff">📱 View phone mirror</button>
 <div class="banner" id="a2hs" style="display:none">
   📌 <b>Save this page:</b> add it to your home screen so your conference setup is one tap away.<br>
   <span style="color:#999;font-size:12px" id="a2hsHow"></span>
+</div>
+
+<h2>Your company (intel base)</h2>
+<p style="font-size:12px;color:#888;margin:0 0 4px">Also used to suggest your accent color below, from your site's favicon.</p>
+<label>Company website URL</label><input id="companyUrl" placeholder="yourco.com">
+<button onclick="scanCompany()" id="btnCo">Scan site</button>
+<div class="out" id="outCo"></div>
+
+<h2>Conference schedule</h2>
+<p style="font-size:12px;color:#888;margin:0 0 4px">Also used to suggest an event label below, from the agenda page's title.</p>
+<label>Agenda page URL</label><input id="scheduleUrl" placeholder="conf.example.com/agenda">
+<button onclick="importSchedule()" id="btnSched">Import schedule</button>
+<div class="out" id="outSched"></div>
+<div id="sessPreview"></div>
+
+<h2>Branding</h2>
+<p style="font-size:12px;color:#888;margin:0 0 4px">Make it feel like your booth's tool, not a generic app. Shows on the R1 and phone header, and on the home-screen icon if you add this page to your phone.</p>
+<label>Event / company label</label><input id="brandName" placeholder="Acme @ SaaStr 2026" maxlength="40">
+<label>Accent color</label>
+<div class="swatch-row">
+  <input type="color" id="brandColor" value="#ff6600">
+  <span class="hint">used for headers, buttons, favorites, QR labels</span>
+</div>
+<div id="faviconRow" style="display:none;margin-top:10px">
+  <div class="swatch-row" style="margin-bottom:6px">
+    <img id="faviconImg" style="width:24px;height:24px;image-rendering:pixelated;background:#fff;border-radius:4px">
+    <span class="hint">pulled from your company site's favicon above — tap one to use it</span>
+  </div>
+  <div id="swatches" class="swatches"></div>
 </div>
 
 <h2>Networking</h2>
@@ -46,18 +83,7 @@
 <label>Landing page URL (optional)</label><input id="landing" placeholder="yourco.com/demo">
 <label>Landing page label</label><input id="landingLabel" placeholder="Product demo">
 
-<h2>Conference schedule</h2>
-<label>Agenda page URL</label><input id="scheduleUrl" placeholder="conf.example.com/agenda">
-<button onclick="importSchedule()" id="btnSched">Import schedule</button>
-<div class="out" id="outSched"></div>
-<div id="sessPreview"></div>
-
-<h2>Your company (intel base)</h2>
-<label>Company website URL</label><input id="companyUrl" placeholder="yourco.com">
-<button onclick="scanCompany()" id="btnCo">Scan site</button>
-<div class="out" id="outCo"></div>
-
-<div style="border-top:2px solid #f60; margin-top:24px; padding-top:14px; display:flex; gap:10px;">
+<div style="border-top:2px solid var(--accent); margin-top:24px; padding-top:14px; display:flex; gap:10px;">
   <button onclick="saveAll()" style="flex:2">💾 Save all</button>
   <button onclick="syncPhone()" style="flex:1; background:#333; color:#fff">⟳ Sync</button>
 </div>
@@ -73,6 +99,7 @@ if (DEV){
   pill.style.display='inline'; pill.textContent = 'paired: '+DEV;
   $('manifestLink').href = '/manifest.json?d='+DEV;
 }
+function viewPhone(){ location.href = '/phone' + (DEV ? '?d='+DEV : ''); }
 // ---------- URL normalization ----------
 function normalizeUrl(v){
   v = (v||'').trim();
@@ -98,6 +125,11 @@ function normalizeLinkedIn(v){
   var el = $('linkedin');
   if (el) el.addEventListener('blur', function(){ el.value = normalizeLinkedIn(el.value); });
 })();
+// ---------- Branding: live preview of the accent color as you pick ----------
+function applyBrand(color){
+  document.documentElement.style.setProperty('--accent', color || '#ff6600');
+}
+$('brandColor').addEventListener('input', function(){ applyBrand(this.value); });
 // Add-to-home-screen prompt
 (function(){
   var deferred = null;
@@ -155,10 +187,29 @@ async function load(){
     var c = await api('/api/config');
     c = await restoreIfEmpty(c);
     backupLocal(c);
-    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    $('brandColor').value = c.brandColor || '#ff6600';
+    applyBrand($('brandColor').value);
     if ((c.sessions||[]).length) preview(c.sessions);
     if (c.companySummary) out('outCo', 'Company intel saved (' + c.companySummary.length + ' chars).');
+    if (c.companyUrl) fetchBrandColors(c.companyUrl);
   } catch(e){}
+}
+// ---------- Favicon-derived brand-color suggestions ----------
+async function fetchBrandColors(u){
+  try {
+    var j = await api('/api/brandcolors', { url: u });
+    if (j.faviconUrl && j.faviconUrl.indexOf('http') === 0) $('faviconImg').src = j.faviconUrl;
+    var row = $('swatches'); row.innerHTML = '';
+    (j.swatches||[]).forEach(function(hex){
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'swatch'; b.title = hex; b.style.background = hex;
+      b.onclick = function(){ $('brandColor').value = hex; applyBrand(hex); };
+      row.appendChild(b);
+    });
+    if (!(j.swatches||[]).length) row.innerHTML = '<span class="hint">no strong brand color found in the favicon — pick manually above</span>';
+    $('faviconRow').style.display = 'block';
+  } catch(e){ /* best-effort only; never block the rest of setup */ }
 }
 // ---------- Save all ----------
 async function saveAll(){
@@ -168,7 +219,9 @@ async function saveAll(){
     landing: normalizeUrl($('landing').value.trim()),
     landingLabel: $('landingLabel').value.trim(),
     scheduleUrl: normalizeUrl($('scheduleUrl').value.trim()),
-    companyUrl: normalizeUrl($('companyUrl').value.trim())
+    companyUrl: normalizeUrl($('companyUrl').value.trim()),
+    brandName: $('brandName').value.trim().slice(0, 40),
+    brandColor: $('brandColor').value || '#ff6600'
   };
   ['linkedin','landing','scheduleUrl','companyUrl'].forEach(function(id){ $(id).value = payload[id]; });
   try {
@@ -182,7 +235,9 @@ async function syncPhone(){
   try {
     var c = await api('/api/config');
     backupLocal(c);
-    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    $('brandColor').value = c.brandColor || '#ff6600';
+    applyBrand($('brandColor').value);
     if ((c.sessions||[]).length) preview(c.sessions);
     out('outBasic', 'Synced ✓ from server — ' + (c.sessions||[]).length + ' sessions, rev ' + (c.rev||0) + '.');
   } catch(e){ out('outBasic', 'Error: '+e.message, 1); }
@@ -192,7 +247,7 @@ function preview(ss){
   var html = shown.map(function(s){
     return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
   }).join('');
-  if (rest > 0) html += '<div class="sess" id="moreSess" onclick="showAll()" style="color:#f60;cursor:pointer">▸ show '+rest+' more</div>';
+  if (rest > 0) html += '<div class="sess" id="moreSess" onclick="showAll()" style="color:var(--accent);cursor:pointer">▸ show '+rest+' more</div>';
   else html += '<div class="sess" style="color:#666" onclick="hideAll()">▴ collapse</div>';
   $('sessPreview').innerHTML = html;
 }
@@ -207,7 +262,7 @@ function preview(ss, all){
   var html = shown.map(function(s){
     return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
   }).join('');
-  if (!all && rest > 0) html += '<div class="sess" style="color:#f60;cursor:pointer" onclick="showAll()">▸ show '+rest+' more</div>';
+  if (!all && rest > 0) html += '<div class="sess" style="color:var(--accent);cursor:pointer" onclick="showAll()">▸ show '+rest+' more</div>';
   else if (all) html += '<div class="sess" style="color:#666;cursor:pointer" onclick="preview([])">▴ collapse</div>';
   $('sessPreview').innerHTML = html;
 }
@@ -220,6 +275,7 @@ async function importSchedule(){
   try {
     var j = await api('/api/schedule', { url:u });
     if (j.sessions.length){ out('outSched', j.sessions.length + ' sessions extracted ✓ — R1 will auto-sync.'); preview(j.sessions);
+      if (j.eventName && !$('brandName').value.trim()){ $('brandName').value = j.eventName; api('/api/config', { brandName: j.eventName }); }
       var c = await api('/api/config'); backupLocal(c); }
     else out('outSched', 'No time-pattern sessions found on that page. Try the printable/simple agenda URL.', 1);
   } catch(e){ out('outSched','Error: '+e.message,1); }
@@ -236,6 +292,7 @@ async function scanCompany(){
     var c = await api('/api/config'); backupLocal(c);
   } catch(e){ out('outCo','Error: '+e.message,1); }
   $('btnCo').disabled = false;
+  fetchBrandColors(u);
 }
 load();
 </script>

@@ -2,6 +2,7 @@
 // Serves: /r1/ (creation), /setup (phone config page), /api/* (config, schedule extract, site intel scrape)
 const http = require('http');
 const https = require('https');
+const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
@@ -19,7 +20,7 @@ function devPath(id) {
 }
 function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
-  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, rev: 0 }; }
+  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, intel: {}, brandName: '', brandColor: '#ff6600', rev: 0 }; }
 }
 function saveConfig(id, cfg) {
   // Anti disk-fill: bound both the number of device files and their size.
@@ -90,7 +91,7 @@ async function pinPublicUrl(url, depth) {
 // cannot change between validation and connection. `Host`/SNI still use the
 // real hostname so virtual-hosted sites and TLS cert checks work correctly.
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-function fetchPinned(pinned, timeoutMs) {
+function fetchPinnedRaw(pinned, timeoutMs) {
   return new Promise((resolve, reject) => {
     const lib = pinned.proto === 'https:' ? https : http;
     const opts = {
@@ -102,7 +103,7 @@ function fetchPinned(pinned, timeoutMs) {
       headers: {
         'Host': pinned.host,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ConfCompanion/1.0',
-        'Accept': 'text/html,application/xhtml+xml'
+        'Accept': '*/*'
       }
     };
     if (lib === https) opts.servername = pinned.host; // SNI + cert hostname check against the real name
@@ -122,25 +123,199 @@ function fetchPinned(pinned, timeoutMs) {
         if (size > MAX_RESPONSE_BYTES) { req.destroy(new Error('response too large')); return; }
         chunks.push(c);
       });
-      res.on('end', () => resolve({ text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => resolve({ buffer: Buffer.concat(chunks), contentType: res.headers['content-type'] || '' }));
     });
     req.on('timeout', () => req.destroy(new Error('timeout')));
     req.on('error', reject);
     req.end();
   });
 }
-// Fetch HTML via IP-pinned connection, manually following + re-validating redirects.
-async function fetchHtml(url, timeoutMs = 12000, depth = 0) {
+// Fetch raw bytes via IP-pinned connection, manually following + re-validating redirects.
+async function fetchBytes(url, timeoutMs = 12000, depth = 0) {
   const pinned = await pinPublicUrl(url, depth);
-  const r = await fetchPinned(pinned, timeoutMs);
+  const r = await fetchPinnedRaw(pinned, timeoutMs);
   if (r.redirectTo !== undefined) {
     if (!r.redirectTo) throw new Error('redirect with no Location');
     // Re-validate + re-resolve + re-pin the next hop (absolute or relative) before following.
     const next = r.redirectTo.startsWith('http') ? r.redirectTo
       : (pinned.proto + '//' + pinned.host + (r.redirectTo.startsWith('/') ? r.redirectTo : '/' + r.redirectTo));
-    return fetchHtml(next, timeoutMs, depth + 1);
+    return fetchBytes(next, timeoutMs, depth + 1);
   }
-  return r.text;
+  return r;
+}
+async function fetchHtml(url, timeoutMs = 12000) {
+  const { buffer } = await fetchBytes(url, timeoutMs);
+  return buffer.toString('utf8');
+}
+
+// ---------- Favicon discovery + decoding ("pixel math" brand-color extraction) ----------
+// No image-processing dependency: PNG uses zlib (Node core) for its DEFLATE stream, so a
+// minimal PNG decoder is ~40 lines of vanilla JS. ICO wraps either a PNG or an uncompressed
+// BMP; both are handled. GIF/JPEG/SVG favicons are not decoded — swatches just come back
+// empty and the caller falls back to manual color entry.
+function resolveUrl(base, href) { try { return new URL(href, base).toString(); } catch (e) { return null; } }
+function findFaviconHref(html) {
+  const re = /<link\s+[^>]*rel=["']([^"']*icon[^"']*)["'][^>]*>/gi;
+  let m, best = null;
+  while ((m = re.exec(html))) {
+    const hrefM = m[0].match(/href=["']([^"']+)["']/i);
+    if (!hrefM) continue;
+    if (/apple-touch-icon/i.test(m[1])) return hrefM[1]; // usually the highest-fidelity PNG
+    if (!best) best = hrefM[1];
+  }
+  return best;
+}
+async function getFaviconUrl(siteUrl) {
+  let html = '';
+  try { html = await fetchHtml(siteUrl, 8000); } catch (e) { /* fall through to /favicon.ico guess */ }
+  const href = html && findFaviconHref(html);
+  return (href && resolveUrl(siteUrl, href)) || resolveUrl(siteUrl, '/favicon.ico');
+}
+function decodePNG(buf) {
+  if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG');
+  let offset = 8, width, height, bitDepth, colorType, interlace, palette = null, trns = null;
+  const idat = [];
+  while (offset + 8 <= buf.length) {
+    const len = buf.readUInt32BE(offset);
+    const type = buf.toString('ascii', offset + 4, offset + 8);
+    const data = buf.slice(offset + 8, offset + 8 + len);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4);
+      bitDepth = data[8]; colorType = data[9]; interlace = data[12];
+    } else if (type === 'PLTE') palette = data;
+    else if (type === 'tRNS') trns = data;
+    else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    offset += 8 + len + 4;
+  }
+  if (bitDepth !== 8) throw new Error('unsupported PNG bit depth');
+  if (interlace) throw new Error('interlaced PNG unsupported');
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+  if (!channels) throw new Error('unsupported PNG color type');
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(height * stride);
+  let pos = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[pos]; pos++;
+    const rowStart = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const raw8 = raw[pos + x];
+      const a = x >= channels ? pixels[rowStart + x - channels] : 0;
+      const b = y > 0 ? pixels[rowStart - stride + x] : 0;
+      const c = (x >= channels && y > 0) ? pixels[rowStart - stride + x - channels] : 0;
+      let val;
+      switch (filter) {
+        case 0: val = raw8; break;
+        case 1: val = raw8 + a; break;
+        case 2: val = raw8 + b; break;
+        case 3: val = raw8 + ((a + b) >> 1); break;
+        case 4: {
+          const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          val = raw8 + (pa <= pb && pa <= pc ? a : (pb <= pc ? b : c)); break;
+        }
+        default: throw new Error('bad PNG filter');
+      }
+      pixels[rowStart + x] = val & 0xff;
+    }
+    pos += stride;
+  }
+  const out = Buffer.alloc(width * height * 4);
+  for (let i = 0, p = 0; i < width * height; i++, p += channels) {
+    let r, g, b, a = 255;
+    if (colorType === 2) { r = pixels[p]; g = pixels[p + 1]; b = pixels[p + 2]; }
+    else if (colorType === 6) { r = pixels[p]; g = pixels[p + 1]; b = pixels[p + 2]; a = pixels[p + 3]; }
+    else if (colorType === 0) { r = g = b = pixels[p]; }
+    else if (colorType === 4) { r = g = b = pixels[p]; a = pixels[p + 1]; }
+    else { // colorType 3: palette
+      const idx = pixels[p];
+      r = palette[idx * 3]; g = palette[idx * 3 + 1]; b = palette[idx * 3 + 2];
+      a = trns && trns[idx] !== undefined ? trns[idx] : 255;
+    }
+    out[i * 4] = r; out[i * 4 + 1] = g; out[i * 4 + 2] = b; out[i * 4 + 3] = a;
+  }
+  return { width, height, pixels: out };
+}
+// Uncompressed 24/32bpp BMP as embedded in an ICO (no BITMAPFILEHEADER; height is doubled
+// to account for the legacy AND-mask row that trails the color data).
+function decodeIcoBitmap(buf) {
+  const headerSize = buf.readUInt32LE(0);
+  const width = buf.readInt32LE(4);
+  const height = Math.abs(buf.readInt32LE(8)) / 2;
+  const bitCount = buf.readUInt16LE(14);
+  const compression = buf.readUInt32LE(16);
+  if (compression !== 0) throw new Error('compressed ICO bitmap unsupported');
+  if (bitCount !== 24 && bitCount !== 32) throw new Error('unsupported ICO bit depth');
+  const bpp = bitCount / 8;
+  const rowSize = Math.floor((bitCount * width + 31) / 32) * 4;
+  const out = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const srcRow = headerSize + (height - 1 - y) * rowSize; // BMP rows are bottom-up
+    for (let x = 0; x < width; x++) {
+      const p = srcRow + x * bpp;
+      const o = (y * width + x) * 4;
+      out[o] = buf[p + 2]; out[o + 1] = buf[p + 1]; out[o + 2] = buf[p]; out[o + 3] = bpp === 4 ? buf[p + 3] : 255;
+    }
+  }
+  return { width, height, pixels: out };
+}
+function decodeIco(buf) {
+  const count = buf.readUInt16LE(4);
+  let best = null;
+  for (let i = 0; i < count; i++) {
+    const off = 6 + i * 16;
+    let w = buf[off], h = buf[off + 1]; if (w === 0) w = 256; if (h === 0) h = 256;
+    const bitCount = buf.readUInt16LE(off + 6);
+    const size = buf.readUInt32LE(off + 8);
+    const dataOffset = buf.readUInt32LE(off + 12);
+    const score = w * h * 1000 + bitCount;
+    if (!best || score > best.score) best = { size, dataOffset, score };
+  }
+  if (!best) throw new Error('empty ICO directory');
+  const img = buf.slice(best.dataOffset, best.dataOffset + best.size);
+  if (img.length >= 8 && img.readUInt32BE(0) === 0x89504e47) return decodePNG(img);
+  return decodeIcoBitmap(img);
+}
+function decodeFavicon(buf) {
+  if (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47) return decodePNG(buf);
+  if (buf.length >= 4 && buf.readUInt16LE(0) === 0 && buf.readUInt16LE(2) === 1) return decodeIco(buf);
+  throw new Error('unsupported favicon format (need PNG or ICO)');
+}
+// Quantize non-transparent, non-neutral pixels into coarse color buckets, weight each
+// bucket by frequency * saturation (so a small vibrant logo mark outranks a big grey/white
+// background), and return the top N as deduplicated hex swatches.
+function extractSwatches(img, maxSwatches) {
+  maxSwatches = maxSwatches || 5;
+  const STEP = 32;
+  const buckets = new Map();
+  for (let i = 0; i < img.pixels.length; i += 4) {
+    const r = img.pixels[i], g = img.pixels[i + 1], b = img.pixels[i + 2], a = img.pixels[i + 3];
+    if (a < 128) continue;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    if (max < 24 || min > 235) continue; // skip near-black / near-white
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const key = Math.round(r / STEP) + ',' + Math.round(g / STEP) + ',' + Math.round(b / STEP);
+    let bucket = buckets.get(key);
+    if (!bucket) { bucket = { r: 0, g: 0, b: 0, count: 0, satSum: 0 }; buckets.set(key, bucket); }
+    bucket.r += r; bucket.g += g; bucket.b += b; bucket.count++; bucket.satSum += sat;
+  }
+  const toHex = (v) => v.toString(16).padStart(2, '0');
+  const hexDist = (h1, h2) => Math.sqrt([1, 3, 5].reduce((s, i) => {
+    const d = parseInt(h1.slice(i, i + 2), 16) - parseInt(h2.slice(i, i + 2), 16); return s + d * d;
+  }, 0));
+  const ranked = [...buckets.values()]
+    .map((c) => ({
+      hex: '#' + toHex(Math.round(c.r / c.count)) + toHex(Math.round(c.g / c.count)) + toHex(Math.round(c.b / c.count)),
+      weight: c.count * (0.4 + c.satSum / c.count)
+    }))
+    .sort((a, b) => b.weight - a.weight);
+  const out = [];
+  for (const c of ranked) {
+    if (out.some((h) => hexDist(h, c.hex) < 40)) continue;
+    out.push(c.hex);
+    if (out.length >= maxSwatches) break;
+  }
+  return out;
 }
 
 function htmlToText(html) {
@@ -215,6 +390,26 @@ function parseStructured(html) {
   }
   return null;
 }
+// Guess a short event/conference name from the agenda page, to suggest as the R1/phone
+// header label. Prefers og:site_name (usually just the event brand, e.g. "SaaStr"), then
+// og:title, then <title> with common boilerplate suffixes trimmed off.
+function guessEventName(html) {
+  const metaMatch = (prop) => {
+    const re = new RegExp('<meta[^>]+(?:property|name)=["\']' + prop + '["\'][^>]+content=["\']([^"\']+)["\']', 'i');
+    const m = html.match(re);
+    return m ? decodeEntities(m[1]).trim() : '';
+  };
+  let name = metaMatch('og:site_name');
+  if (!name) name = metaMatch('og:title');
+  if (!name) {
+    const t = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (t) name = decodeEntities(t[1]).trim();
+  }
+  if (!name) return '';
+  name = name.replace(/\s*[|\-–—:]\s*(agenda|schedule|home|homepage)\b.*$/i, '')
+    .replace(/\b(agenda|schedule)\b/gi, '').replace(/\s{2,}/g, ' ').trim();
+  return name.slice(0, 40);
+}
 
 // Looks for lines with time patterns; the following title-ish text becomes the session.
 const TIME_RE = /\b(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?(?:\s*[-–—to]+\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)?)\b/;
@@ -277,6 +472,9 @@ const server = http.createServer(async (req, res) => {
       const prev = loadConfig(id);
       // Merge favorites from phone + R1 rather than overwriting (cross-device favs).
       if (body.favs && prev.favs) body.favs = Object.assign({}, prev.favs, body.favs);
+      // Merge per-session intel by id too — the R1 pushes one session's result at a time
+      // (it does the LLM analysis; the phone just mirrors whatever's landed so far).
+      if (body.intel && prev.intel) body.intel = Object.assign({}, prev.intel, body.intel);
       const cfg = { ...prev, ...body };
       cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
@@ -294,7 +492,7 @@ const server = http.createServer(async (req, res) => {
       if (sessions.length) cfg.sessions = sessions;
       cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
-      return send(res, 200, { sessions, source: structured ? 'structured' : 'heuristic', rawText: sessions.length ? undefined : htmlToText(html).slice(0, 6000) });
+      return send(res, 200, { sessions, source: structured ? 'structured' : 'heuristic', eventName: guessEventName(html), rawText: sessions.length ? undefined : htmlToText(html).slice(0, 6000) });
     }
     if (p === '/api/extract' && req.method === 'POST') {
       const { url, save, d } = await readBody(req);
@@ -321,12 +519,31 @@ const server = http.createServer(async (req, res) => {
         prospectText
       });
     }
+    // Suggest accent-color swatches by pulling the company site's favicon and pixel-mathing
+    // its dominant non-neutral colors. Best-effort: unsupported image formats (SVG/JPEG/GIF)
+    // or a missing favicon just come back with an empty swatch list, not an error.
+    if (p === '/api/brandcolors' && req.method === 'POST') {
+      const { url } = await readBody(req);
+      if (!url) return send(res, 400, { error: 'url required' });
+      let faviconUrl = null;
+      try { faviconUrl = await getFaviconUrl(url); } catch (e) { return send(res, 200, { swatches: [], faviconUrl: null }); }
+      try {
+        const { buffer } = await fetchBytes(faviconUrl, 8000);
+        const img = decodeFavicon(buffer);
+        return send(res, 200, { swatches: extractSwatches(img, 5), faviconUrl });
+      } catch (e) {
+        return send(res, 200, { swatches: [], faviconUrl, note: String(e.message || e) });
+      }
+    }
     // ---- Static ----
     if (p === '/manifest.json') {
+      const bcfg = loadConfig(qd);
+      const brandName = (bcfg.brandName || '').slice(0, 40);
       return send(res, 200, JSON.stringify({
-        name: 'Conf Companion', short_name: 'ConfComp',
+        name: brandName ? brandName + ' — Conf Companion' : 'Conf Companion',
+        short_name: brandName ? brandName.slice(0, 12) : 'ConfComp',
         start_url: '/phone' + (qd ? '?d=' + qd : ''),
-        display: 'standalone', background_color: '#111111', theme_color: '#ff6600',
+        display: 'standalone', background_color: '#111111', theme_color: bcfg.brandColor || '#ff6600',
         icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }]
       }), 'application/manifest+json');
     }

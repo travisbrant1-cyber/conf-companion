@@ -39,12 +39,63 @@ data/*.json        per-device config (gitignored; regenerated at runtime)
 - `POST /api/schedule` `{url,d}` → fetch+parse agenda, save sessions
 - `POST /api/extract` `{url,save}` → scrape a page to text (company summary)
 - `POST /api/intel` `{prospect,prospectUrl,d}` → bundle my-company + prospect text for the R1 LLM
+- `POST /api/brandcolors` `{url}` → find the site's favicon, decode it, and return up to 5
+  suggested hex swatches + the favicon URL (does not save; setup.html saves via `/api/config`
+  when the user picks a swatch and hits Save all)
+- `POST /api/schedule` also returns `eventName` (guessed from the agenda page's
+  `og:site_name`/`og:title`/`<title>`) — setup.html uses it to prefill the brand
+  label if that field is still empty
 
 ### Data model (per device id = `cc` + 10 chars)
 ```
 { name, linkedin, landing, landingLabel, companyUrl, companySummary,
-  scheduleUrl, sessions:[{id,time,title,speaker,desc,day}], favs:{}, rev }
+  scheduleUrl, sessions:[{id,time,title,speaker,desc,day}], favs:{},
+  intel:{ [sessionId]: {who,angle,openers:[],avoid} },
+  brandName, brandColor, rev }
 ```
+
+### Branding
+Set from `setup.html` (event/company label + an `<input type=color>` accent
+swatch, live-previewed via a `--accent` CSS custom property as you pick).
+Propagates through the normal `/api/config` sync path — no new endpoint.
+- `brandName` replaces the "CONF COMPANION" header text on both the R1
+  (`#brandLabel` in `r1/index.html`) and the phone mirror (`#brandLabel` in
+  `phone.html`), and feeds the PWA manifest's `name`/`short_name`.
+- `brandColor` (hex, default `#ff6600`) is applied as `--accent` on
+  `document.documentElement` on all three surfaces (R1, phone, setup), which
+  every previously-hardcoded `#f60`/`#ff6600` in their `<style>` blocks and a
+  few inline JS style strings now references instead. Also sets the phone's
+  `<meta name=theme-color>` and the manifest's `theme_color`, so an
+  add-to-home-screen icon/status-bar tint matches too.
+- Defaults to the same orange as before if unset, so existing configs render
+  unchanged.
+
+### Favicon-derived swatches ("pixel math" brand colors)
+`setup.html` calls `/api/brandcolors` (on page load if `companyUrl` is already
+set, and again after "Scan site") to suggest accent colors pulled from the
+company site's actual favicon, shown as clickable swatches next to the manual
+color picker.
+- **No image-processing dependency** (stays zero-dependency): `server.js` has
+  a from-scratch PNG decoder (using Node's built-in `zlib` for the IDAT
+  DEFLATE stream — handles color types 0/2/3/4/6 at 8-bit depth,
+  non-interlaced) and an ICO-container parser that picks the largest embedded
+  image and decodes it as PNG-in-ICO or uncompressed 24/32bpp BMP-in-ICO.
+  SVG/GIF/JPEG favicons and indexed/interlaced/16-bit PNGs aren't decoded —
+  `swatches` just comes back empty in that case (verified live against
+  Microsoft's favicon.ico, which is an older indexed BMP-in-ICO).
+- Favicon discovery: fetch the site's HTML, look for `<link rel=*icon*>`
+  (preferring `apple-touch-icon`), fall back to `/favicon.ico`.
+- Color math: quantize non-transparent, non-near-white/black pixels into
+  coarse buckets, rank by `frequency × saturation` (so a small vibrant logo
+  mark outranks a big grey/white background), dedupe near-identical hues,
+  return the top 5.
+- Uses the same `fetchBytes`/`pinPublicUrl` pinned-IP path as everything else,
+  so favicon fetches get the same SSRF protection as schedule/company scraping
+  — no new attack surface.
+- Verified live against real sites: Google's favicon.ico (PNG-in-ICO)
+  decoded to `#4285f4 #ea4436 #35a854 #fbbc05` — essentially exact matches
+  for Google's real brand palette. Stack Overflow, Python.org, and Node.js
+  also matched their real brand colors closely.
 
 ## How sync works
 - Phone `setup.html` → Save-all POSTs config (bumps `rev`).
@@ -112,6 +163,37 @@ Claude reviewed the repo and the following were implemented:
 **Not done (by design):** adding real auth/tokens. Zero-account app; the id is
 the key. If you want a real access token, that's a separate change.
 
+## Setup page flow + R1-does-the-AI, phone-mirrors design (2026-07-25, uncommitted)
+- **Setup page reordered**: "Your company" and "Conference schedule" now come
+  *before* "Branding", since both feed it (favicon → accent color, agenda page
+  title → event label) — you fill the sources, then see the suggested result.
+- **`📱 View phone mirror` button** at the top of `setup.html` (`viewPhone()`),
+  since Edit → Setup previously had no way back to the phone view except
+  re-typing the URL.
+- **Prospect intel now syncs to phone.** Architecture decision: the R1 does the
+  LLM analysis (it's the only surface with on-device LLM access via
+  `PluginMessageHandler`); the phone is a mirror, not a second place that
+  generates intel. So: `r1/index.html`'s `window.onPluginMessage` handler now
+  calls `pushIntel(sessionId, o)` right after a successful LLM response, which
+  POSTs `{intel:{[sessionId]: o}}` to `/api/config` (merged server-side like
+  `favs`, same per-session-id shallow merge). `phone.html`'s schedule rows show
+  a 🧠 badge for sessions with intel, expanding to the full who/angle/openers/
+  avoid block on tap — same collapse mechanism as the description text (the
+  first pass at this had a bug: the intel `<div>` wasn't covered by the
+  `.row.open` selector, so it rendered permanently expanded; fixed by adding
+  `.row .intel{display:none}` alongside `.detail`). If the R1's LLM call fails
+  and it falls back to raw-context (`renderIntelFallback`), nothing is pushed —
+  the phone simply won't show intel for that session, which is correct per this
+  design (no AI generation happens anywhere but the R1).
+- **Phone scroll fix**: reported as scrolling like "a mask pulling down rather
+  than a page" — likely iOS Safari's rubber-band overscroll flashing the
+  default white `<html>` background against the dark `<body>` (only `body` had
+  `background:#111`, `html` had none). Fixed by setting `html{background:
+  #0a0a0a}` and `overscroll-behavior-y:none` on both `html` and `body`, plus a
+  `z-index:5` on `.btnrow` to match the header's stacking. Not verified on a
+  real phone yet — worth confirming this actually resolves it, since it was
+  diagnosed from the symptom description, not a reproduced repro.
+
 ## Run locally
 ```bash
 cd C:\Users\travi\Documents\R1-projects\conf-companion
@@ -142,3 +224,8 @@ node "%LOCALAPPDATA%\Temp\hermes-verify-cc.js"
   physical R1 (logic + served HTML verified, not pixels).
 - If you want real auth, scope a per-device token separate from the id.
 - `r1/jsQR.js` is now dead code (no camera scan) — safe to delete later.
+- Phone scroll fix (see above) needs confirming on an actual phone, not just
+  the desktop preview browser used to build it.
+- Microsoft-style indexed-BMP-in-ICO favicons still don't decode (returns empty
+  swatches, not a crash) — low priority, PNG/PNG-in-ICO covers the vast
+  majority of real sites.

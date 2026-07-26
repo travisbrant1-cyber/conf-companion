@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
 <title>Conf Companion</title>
 <style>
+  :root { --accent: #ff6600; }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { width:240px; height:282px; overflow:hidden; background:#000; color:#fff;
     font-family:Helvetica,Arial,sans-serif; }
@@ -12,42 +13,42 @@
   .screen { position:absolute; inset:0; display:none; flex-direction:column; }
   .screen.on { display:flex; }
   .hdr { height:24px; line-height:24px; padding:0 6px; font-size:12px; font-weight:bold;
-    background:#111; border-bottom:2px solid #f60; white-space:nowrap; overflow:hidden; }
+    background:#111; border-bottom:2px solid var(--accent); white-space:nowrap; overflow:hidden; }
   .hdr .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#f33; margin-right:5px; }
   .hdr .dot.live { background:#0c0; }
   .list { flex:1; overflow:hidden; }
   .row { min-height:44px; display:flex; align-items:center; padding:0 6px; border-bottom:1px solid #1a1a1a;
     font-size:13px; gap:6px; }
-  .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:#f60; color:#000;
+  .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:var(--accent); color:#000;
     font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center; }
   .row.sel { background:#fff; color:#000; }
   .row .txt { flex:1; overflow:hidden; }
   .row .t1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:bold; }
   .row .t2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:10px; color:#999; }
   .row.sel .t2 { color:#555; }
-  .row .fav { font-size:14px; color:#f60; }
+  .row .fav { font-size:14px; color:var(--accent); }
   .tip { height:16px; line-height:16px; font-size:9px; color:#888; text-align:center; background:#0a0a0a; }
   .qrwrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff; }
   .qrwrap img { image-rendering:pixelated; }
   .qrlabel { font-size:10px; color:#000; margin-top:3px; max-width:230px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; }
   .body { flex:1; overflow:hidden; padding:6px; font-size:11px; line-height:1.35; }
-  .body h3 { font-size:11px; color:#f60; margin:5px 0 2px; }
+  .body h3 { font-size:11px; color:var(--accent); margin:5px 0 2px; }
   .body ul { margin-left:14px; }
   .body li { margin-bottom:3px; }
   .center { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column;
     gap:8px; padding:10px; text-align:center; font-size:12px; color:#aaa; }
-  .spin { width:20px; height:20px; border:3px solid #333; border-top-color:#f60; border-radius:50%;
+  .spin { width:20px; height:20px; border:3px solid #333; border-top-color:var(--accent); border-radius:50%;
     animation:sp .8s linear infinite; }
   @keyframes sp { to { transform:rotate(360deg); } }
   body.loading .hdr { border-bottom-color:#ff0; }
-  .daydiv { padding:6px 6px 3px; font-size:9px; letter-spacing:1px; color:#f60; border-bottom:1px solid #333; background:#0a0a0a; position:sticky; top:0; }
+  .daydiv { padding:6px 6px 3px; font-size:9px; letter-spacing:1px; color:var(--accent); border-bottom:1px solid #333; background:#0a0a0a; position:sticky; top:0; }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="screen" id="home">
-    <div class="hdr"><span class="dot" id="statusDot"></span>CONF COMPANION</div>
+    <div class="hdr"><span class="dot" id="statusDot"></span><span id="brandLabel">CONF COMPANION</span></div>
     <div class="list" id="homeList"></div>
     <div class="tip">scroll · tap/PTT select</div>
   </div>
@@ -78,11 +79,11 @@
     <div class="tip">hold PTT / swipe → back</div>
   </div>
   <div class="screen" id="scan">
-    <div class="hdr"><span class="dot live" style="background:#f60"></span>SCAN LINKEDIN QR</div>
+    <div class="hdr"><span class="dot live" style="background:var(--accent)"></span>SCAN LINKEDIN QR</div>
     <div style="flex:1;position:relative;background:#000;overflow:hidden">
       <video id="scanVid" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
-      <div style="position:absolute;inset:20px;border:2px solid #f60;border-radius:8px;pointer-events:none"></div>
-      <div id="scanHint" style="position:absolute;left:0;right:0;bottom:4px;text-align:center;font-size:10px;color:#f60;text-shadow:0 0 3px #000">phone: LinkedIn ▸ search ▸ QR icon</div>
+      <div style="position:absolute;inset:20px;border:2px solid var(--accent);border-radius:8px;pointer-events:none"></div>
+      <div id="scanHint" style="position:absolute;left:0;right:0;bottom:4px;text-align:center;font-size:10px;color:var(--accent);text-shadow:0 0 3px #000">phone: LinkedIn ▸ search ▸ QR icon</div>
     </div>
     <div class="tip">aim at phone QR · hold PTT cancel</div>
   </div>
@@ -192,7 +193,7 @@ function clearTimers(){ _wakeTimers.forEach(clearInterval); _wakeTimers = []; }
 function startCountdown(hostEl, sec){
   clearTimers();
   var cd = document.createElement('div');
-  cd.style.cssText = 'font-size:26px;font-weight:bold;color:#f60;margin-top:8px';
+  cd.style.cssText = 'font-size:26px;font-weight:bold;color:var(--accent);margin-top:8px';
   cd.textContent = sec;
   var note = document.createElement('div');
   note.style.cssText = 'font-size:10px;color:#888';
@@ -318,7 +319,12 @@ function mkRow(bullet, t1, t2, fn, favMark){
   r.addEventListener('click', function(){ sel = selItems.findIndex(function(it){ return it.el===r; }); paintSel(); fn(); });
   return r;
 }
+function applyBrand(){
+  document.documentElement.style.setProperty('--accent', cfg.brandColor || '#ff6600');
+  $('brandLabel').textContent = (cfg.brandName || 'CONF COMPANION').toUpperCase().slice(0, 26);
+}
 function renderHome(){
+  applyBrand();
   var L = $('homeList'); L.innerHTML = '';
   L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect (?fromQR=1)' : 'add handle on phone (Pair)', showLinkedIn));
   L.appendChild(mkRow('◨', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
@@ -494,9 +500,11 @@ function openIntelPick(){
   openSchedule(); // pick a session, then choose Intel inside
   toast('PICK A SESSION', 'Open a session from the schedule,<br>then choose <b>Intel on this prospect</b>.');
 }
+var curIntelFor = null; // session currently being analyzed — so a late LLM reply can be pushed to phone
 function runIntel(s){
   backTo = 'sess';
   intelScroll = 0;
+  curIntelFor = s;
   $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Building intel…</div></div>';
   show('intel'); selItems = [];
   loading(true);
@@ -536,13 +544,27 @@ function renderIntelFallback(j){
     '<h3>YOUR PITCH BASE</h3><div>' + esc((j.myCompany||'').slice(0,600)) + '</div>' +
     '<div style="color:#666;margin-top:6px">(LLM unavailable — raw context shown)</div>';
 }
+// R1 does the LLM analysis; push the result to the server so the phone mirror (which has
+// no on-device LLM of its own) picks it up on its next sync. Keyed by session id.
+function pushIntel(sessionId, o){
+  cfg.intel = cfg.intel || {};
+  cfg.intel[sessionId] = o;
+  saveLocal();
+  var patch = {}; patch[sessionId] = o;
+  wakeFetch(BACKEND + '/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ d: devId, intel: patch })
+  }).catch(function(){});
+}
 window.onPluginMessage = function(data){
   if (expect === 'intel'){
     expect = null;
     var payload = data.data || data.message || '';
     try {
       var m = String(payload).match(/\{[\s\S]*\}/);
-      renderIntel(JSON.parse(m ? m[0] : payload));
+      var o = JSON.parse(m ? m[0] : payload);
+      renderIntel(o);
+      if (curIntelFor) pushIntel(curIntelFor.id, o);
     } catch(e){
       $('intelBody').innerHTML = '<h3>INTEL</h3><div>' + esc(String(data.message||payload).slice(0,900)) + '</div>';
     }
