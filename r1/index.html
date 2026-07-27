@@ -120,8 +120,7 @@
   </div>
   <div class="screen" id="pitch">
     <div class="hdr" id="pitchHdr"><span class="hdr-text">TALKING POINTS</span></div>
-    <div class="body" id="pitchBody"><div class="center"><div class="spin"></div><div>Building talking points…</div></div></div>
-    <div class="list" id="pitchList" style="flex:0 0 auto"></div>
+    <div class="body" id="pitchBody" style="overflow-y:auto"><div class="center"><div class="spin"></div><div>Building talking points…</div></div></div>
     <div class="tip">scroll · PTT select · hold back</div>
   </div>
   <div class="screen" id="msg">
@@ -722,7 +721,7 @@ function openPitchPoints(){
 function runPitchPoints(){
   setHdrText($('pitchHdr'), 'TALKING POINTS');
   $('pitchBody').innerHTML = '<div class="center"><div class="spin"></div><div>Building talking points…</div></div>';
-  $('pitchList').innerHTML = ''; selItems = [];
+  selItems = [];
   var topics = (cfg.sessions || []).slice(0, 8).map(function(s){ return s.title; }).filter(Boolean).join('; ');
   var prompt = 'I am attending a conference' + (cfg.brandName ? ' called "' + cfg.brandName + '"' : '') + '.' +
     (topics ? ' Some of its session topics: ' + topics.slice(0, 600) + '.' : '') +
@@ -739,11 +738,13 @@ function runPitchPoints(){
   }
 }
 function renderPitchPoints(points){
+  // Regenerate lives inside the same scrolling body, after the points, instead of pinned in a
+  // fixed-height row below a non-scrolling body — that used to cover/clip the last bullet(s).
   $('pitchBody').innerHTML = '<h3>ALIGN YOUR PITCH</h3><ul>' + points.map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>';
-  $('pitchBody').style.overflow = 'hidden';
-  var L = $('pitchList'); L.innerHTML = '';
-  L.appendChild(mkRow('↻', 'Regenerate', 'fresh take from current company info', runPitchPoints));
-  registerList(L);
+  var regen = mkRow('↻', 'Regenerate', 'fresh take from current company info', runPitchPoints);
+  regen.style.marginTop = '8px';
+  $('pitchBody').appendChild(regen);
+  registerList($('pitchBody'));
 }
 function pushPitchPoints(points){
   cfg.pitchPoints = points;
