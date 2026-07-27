@@ -194,6 +194,146 @@ the key. If you want a real access token, that's a separate change.
   real phone yet — worth confirming this actually resolves it, since it was
   diagnosed from the symptom description, not a reproduced repro.
 
+## R1 navigation, saved intel, richer LinkedIn QR (2026-07-25, uncommitted)
+- **Swipe-back false positives fixed.** The back-swipe detector only checked
+  horizontal delta, so scrolling a list (which drifts horizontally too on a
+  screen this small) regularly misfired as "go back." Now requires the motion
+  to be clearly horizontal (`dx > 60 && |dy| < dx*0.5`) before triggering.
+- **Added a non-gesture back target.** Every non-home screen's header is now
+  tappable (`.hdr.back`, wired generically via
+  `document.querySelectorAll('.screen:not(#home) .hdr')` rather than per-screen
+  markup) with a `‹` affordance — swipe stays as a secondary option now that
+  it's fixed, but a visible tap target is the more reliable primary one.
+- **Prospect intel is now viewable, not just generate-and-forget.** New
+  `#intellist` screen ("SAVED INTEL") lists every session with saved intel;
+  tapping the home row goes here if any exist, or falls through to the old
+  pick-a-session flow if none do yet. `backTo` now supports `'intellist'` as a
+  return target alongside `'sess'`/home.
+- **Company-summary requirement dropped as a hard blocker.** `openIntelPick()`
+  no longer requires `cfg.companySummary` before generating intel — the person
+  running the R1 already knows their own pitch. `runIntel()`'s prompt now
+  omits the "MY COMPANY" clause entirely when empty instead of sending an
+  empty triple-quoted block.
+- **LinkedIn QR screen improved**: QR size is now computed from
+  `q.getModuleCount()` to target ~180px instead of a fixed small cellSize
+  (`Math.max(3, Math.min(8, Math.floor(180 / modCount)))`), and a `#qrPersonRow`
+  above the QR shows the company favicon (`cfg.faviconUrl`, persisted from
+  `/api/brandcolors` in setup.html) plus name + a new `title` field (role,
+  added to the Networking section) — `renderQR()` takes an optional 4th
+  `personHtml` arg for this, used by `showLinkedIn()` only so far.
+- **Phone schedule is now collapsible** (`#schedHdr` click toggles
+  `#schedList` display, caret flips ▾/▸, persisted in `localStorage` under
+  `cc_sched_collapsed`) — a long agenda no longer pushes the rest of the page
+  down every visit.
+- All verified live in the desktop preview browser against a seeded test
+  device; **not yet verified on the physical R1** (touch/swipe behavior in
+  particular needs a real screen, not just a resized desktop viewport).
+
+## Visual redesign: Linear design language (2026-07-26, uncommitted)
+Installed a new user-level skill, `design-md` (`~/.claude/skills/design-md`), bundling
+[voltagent/awesome-design-md](https://github.com/voltagent/awesome-design-md) — 74
+structured design-token analyses (colors/type/spacing/components) of real brands'
+visual languages, MIT licensed. Used it to reskin all three surfaces to **Linear**
+(linear.app)'s design language, chosen from a shortlist over Stripe/Notion/Vercel.
+
+- **New default accent**: `#5e6ad2` (Linear lavender), replacing the old default
+  `#ff6600` orange, everywhere a fallback exists (`applyBrand()` in both
+  `r1/index.html` and `phone.html`, `saveAll()`/`load()`/`syncPhone()` in
+  `setup.html`, `loadConfig()`'s default object and the manifest's default
+  `theme_color` in `server.js`). **The favicon-derived swatch picker and manual
+  color picker still fully override this per-device** — this only changes what a
+  brand-new, unconfigured device starts with.
+- **New CSS custom properties** on all three files: `--accent`, `--accent-hover`,
+  `--on-accent`, `--canvas`, `--surface-1`, `--surface-2`, `--hairline`,
+  `--hairline-strong`, `--ink`, `--ink-muted`, `--ink-tertiary` — Linear's actual
+  token values. Font stack changed to `Inter` with the existing system-font
+  fallback chain (no network font load added — this app runs on a device and over
+  a connection that already need to tolerate cold starts, so a CDN font dependency
+  felt like the wrong tradeoff; falls back to system fonts if Inter isn't present).
+- **Deliberate translation choices, not just a color swap** (each one is a real
+  rule from Linear's own DESIGN.md, not a guess):
+  - Selected/highlighted rows on the R1 stay **white-on-dark** (`.row.sel`),
+    unchanged from before — Linear's spec explicitly says "don't use lavender as
+    a section background or card fill," and white-on-dark is literally their own
+    `button-inverse` component, so this was correct already, not something to
+    "fix" toward more accent color.
+  - Section/card titles (`h2` in setup.html, `h3` in phone.html, `.body h3` on
+    the R1) are **ink-colored, not accent** — Linear's own card-title/feature-card
+    components specify plain ink text; the accent is reserved for the wordmark,
+    links, the primary CTA, and focus rings.
+  - The "brand mark" moment (the one place accent shows as identity rather than
+    function) is the `#brandLabel`/wordmark text specifically, not a border or
+    fill — added `#brandLabel { color: var(--accent) }` on R1 and phone.
+  - Session times, day-dividers, and links (`.link` in phone.html) keep the
+    accent — these are wayfinding/scannability aids in a quick-glance utility,
+    which is a different job than a marketing site's decorative restraint, so a
+    stricter reading of "scarce" was relaxed here on purpose.
+  - Added a real focus ring on `setup.html` inputs (`box-shadow` + border color
+    on `:focus`) matching Linear's documented focus treatment — this didn't exist
+    before at all, a genuine accessibility improvement alongside the reskin.
+  - Button text on accent-filled elements (row bullets, primary buttons) is
+    `--on-accent` (`#ffffff`) now, not black — matches Linear's `on-primary`
+    token and has better contrast against the darker lavender than the old
+    black-on-orange combination did.
+- Verified live in the browser against the same seeded test device used
+  throughout this session: R1 home/QR/schedule screens, phone mirror (including
+  the schedule collapse and intel badge from the previous round of fixes), and
+  setup.html (including the focus ring and swatch picker).
+- **Found and fixed a test-environment artifact, not a real bug**: `r1/index.html`
+  stores its device id in `localStorage['cc_dev']` **base64-encoded**
+  (`btoa`/`atob`), while `phone.html`/`setup.html` store the same key **as a
+  plain string**. On real hardware these never collide (R1 and phone are
+  physically separate devices/browsers). In this desktop preview, multiple
+  "device" tabs share one browser profile's localStorage per origin, so
+  navigating a phone/setup tab to the same device id clobbered the R1 tab's
+  `cc_dev` value with the unencoded form, corrupting `devId` on next load. Not
+  fixed in the app itself (it's not a real-world bug), just worth knowing if
+  local multi-surface testing produces a garbled `devId` again.
+
+## R1 UI polish: header touch target, schedule labels (2026-07-26, uncommitted)
+- **Header height 24px → 34px** (`.hdr`), so the tap-to-go-back header is a
+  properly sized touch target, not just the chevron glyph — the whole bar is
+  clickable already (wired earlier), this just makes it big enough to hit
+  reliably. Padding bumped 6px → 9px to match.
+- **Header text overflow now scrolls instead of clipping**: dynamic header
+  content (`qrHdr`, `sessHdr`, `intelHdr`, `msgHdr`) is wrapped in a
+  `<span class="hdr-text">`; a new `setHdrText(el, text)` helper measures
+  `scrollWidth` vs. the header's `clientWidth` after paint and, if it overflows,
+  adds a `.scrolling` class that runs a `translateX` marquee (pause → slide →
+  pause → slide back, 5s loop) via the `--hdr-dist` custom property. This let us
+  drop the old hard `.slice(0, 20)` truncation on `viewSavedIntel()`'s header —
+  long session titles now scroll instead of losing information.
+- **Schedule row cleanup**: the time badge is a wider pill for `#schedList`
+  rows specifically (36px, `rounded.md` corners) instead of the shared 22px
+  circle bullet, which was cramped for 5-character times like "10:00"; the
+  secondary line no longer repeats the time next to the speaker (the badge
+  already shows it) — just the speaker now.
+- **Row icon-to-text gap** (`.row`) 6px → 10px, app-wide (home menu, schedule,
+  session actions, saved-intel list all share `.row`).
+- **LinkedIn menu subtitle** changed from `quick connect (?fromQR=1)` (internal
+  implementation detail) to `tap to quick connect on LinkedIn`.
+- **Time-bullet regex bug — fixed (2026-07-26).** The old approach stripped an
+  assumed prefix shape (`/^[A-Za-z]{3}\s+\d{1,2}\s+/`, "3 letters + a numeric
+  date") that didn't match either a full day name (`"Monday"` → observed
+  `"ondy9"`) or even the structured parser's own `"Mon 9:00 AM–9:45 AM"` output
+  (no separate numeric date between day and time). Replaced with
+  `timeBadge(t)`: search for `\d{1,2}:\d{2}` anywhere in the string instead of
+  trying to strip a prefix — robust to whatever comes before the actual time.
+  Verified against both the exact failure case and a second format
+  (`"Tue 10:00AM-10:45AM"`).
+- **Menu icons realigned** — were a mix of plain letters (`S`, `i`), an
+  ambiguous geometric shape (`◨` for landing page), and an emoji-range
+  character (`⛓` chains, which renders in full color on Android, clashing with
+  the otherwise monochrome badges): Schedule → `▦` (calendar/grid), Prospect
+  intel → `✦` (sparkle, the common "AI" visual shorthand, applied consistently
+  to all three intel-related rows — home menu, the "Intel on this prospect"
+  session action, and the saved-intel list), Landing page → `↗` (external
+  link), Pair phone → `↔` (two-way link, replacing the color-emoji chain).
+  LinkedIn's `in` and Sync's `⟳` were already fine and left alone. All chosen
+  from Unicode ranges that render as plain text glyphs (Geometric Shapes /
+  Arrows blocks), not the emoji range, so they stay monochrome and pick up
+  `--on-accent` like the rest of the badge.
+
 ## Run locally
 ```bash
 cd C:\Users\travi\Documents\R1-projects\conf-companion

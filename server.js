@@ -20,7 +20,7 @@ function devPath(id) {
 }
 function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
-  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, intel: {}, brandName: '', brandColor: '#ff6600', rev: 0 }; }
+  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, intel: {}, brandName: '', brandColor: '#5e6ad2', rev: 0 }; }
 }
 function saveConfig(id, cfg) {
   // Anti disk-fill: bound both the number of device files and their size.
@@ -543,7 +543,7 @@ const server = http.createServer(async (req, res) => {
         name: brandName ? brandName + ' — Conf Companion' : 'Conf Companion',
         short_name: brandName ? brandName.slice(0, 12) : 'ConfComp',
         start_url: '/phone' + (qd ? '?d=' + qd : ''),
-        display: 'standalone', background_color: '#111111', theme_color: bcfg.brandColor || '#ff6600',
+        display: 'standalone', background_color: '#111111', theme_color: bcfg.brandColor || '#5e6ad2',
         icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }]
       }), 'application/manifest+json');
     }

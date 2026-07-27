@@ -5,44 +5,79 @@
 <meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
 <title>Conf Companion</title>
 <style>
-  :root { --accent: #ff6600; }
+  /* Design language: Linear (linear.app), via the design-md skill — near-black canvas,
+     one scarce lavender accent, four-step surface ladder, hairline borders instead of
+     shadows. Tokens translated from linear.app/DESIGN.md's desktop marketing-site scale
+     down to this 240x282 embedded screen: same hues and accent discipline, proportionally
+     smaller type (their 80px/16px display/body ratio doesn't fit here, so the *ratio*
+     carries over, not the pixel values). See ~/.claude/skills/design-md for the source. */
+  :root {
+    --accent: #5e6ad2;
+    --accent-hover: #828fff;
+    --on-accent: #ffffff;
+    --canvas: #010102;
+    --surface-1: #0f1011;
+    --surface-2: #141516;
+    --hairline: #23252a;
+    --hairline-strong: #34343a;
+    --ink: #f7f8f8;
+    --ink-muted: #8a8f98;
+    --ink-tertiary: #62666d;
+  }
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { width:240px; height:282px; overflow:hidden; background:#000; color:#fff;
-    font-family:Helvetica,Arial,sans-serif; }
+  html,body { width:240px; height:282px; overflow:hidden; background:var(--canvas); color:var(--ink);
+    font-family:Inter,-apple-system,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    letter-spacing:-0.1px; -webkit-font-smoothing:antialiased; }
   #app { width:240px; height:282px; position:relative; }
   .screen { position:absolute; inset:0; display:none; flex-direction:column; }
   .screen.on { display:flex; }
-  .hdr { height:24px; line-height:24px; padding:0 6px; font-size:12px; font-weight:bold;
-    background:#111; border-bottom:2px solid var(--accent); white-space:nowrap; overflow:hidden; }
+  .hdr { height:34px; line-height:34px; padding:0 9px; font-size:12px; font-weight:600; letter-spacing:-0.2px;
+    background:var(--canvas); border-bottom:1px solid var(--hairline); white-space:nowrap; overflow:hidden; }
+  #brandLabel { color:var(--accent); } /* the wordmark is the one place the accent lives as a "brand mark" per spec */
   .hdr .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#f33; margin-right:5px; }
-  .hdr .dot.live { background:#0c0; }
+  .hdr .dot.live { background:#27a644; }
+  .hdr.back { cursor:pointer; } /* the whole 34px bar is the tap target, not just the chevron glyph */
+  .hdr.back::before { content:'‹ '; color:var(--accent); }
+  /* Header text can overflow (long landing-page labels, agenda-derived session times) — instead
+     of hard-clipping, slide it into view and back on a loop once it no longer fits. */
+  .hdr-text { display:inline-block; white-space:nowrap; }
+  .hdr-text.scrolling { animation: hdrMarquee 5s ease-in-out infinite; }
+  @keyframes hdrMarquee {
+    0%, 15% { transform:translateX(0); }
+    50%, 65% { transform:translateX(var(--hdr-dist, 0)); }
+    100% { transform:translateX(0); }
+  }
   .list { flex:1; overflow:hidden; }
-  .row { min-height:44px; display:flex; align-items:center; padding:0 6px; border-bottom:1px solid #1a1a1a;
-    font-size:13px; gap:6px; }
-  .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:var(--accent); color:#000;
-    font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center; }
-  .row.sel { background:#fff; color:#000; }
+  .row { min-height:44px; display:flex; align-items:center; padding:0 6px; border-bottom:1px solid var(--hairline);
+    font-size:13px; gap:10px; background:var(--surface-1); }
+  .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:var(--accent); color:var(--on-accent);
+    font-size:11px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+  #schedList .row .bullet { width:36px; min-width:36px; border-radius:8px; font-size:10px; letter-spacing:-0.3px; }
+  .row.sel { background:#fff; color:#000; } /* Linear's own inverse-canvas/inverse-ink pair, not an accent fill */
   .row .txt { flex:1; overflow:hidden; }
-  .row .t1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:bold; }
-  .row .t2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:10px; color:#999; }
+  .row .t1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
+  .row .t2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:10px; color:var(--ink-muted); }
   .row.sel .t2 { color:#555; }
   .row .fav { font-size:14px; color:var(--accent); }
-  .tip { height:16px; line-height:16px; font-size:9px; color:#888; text-align:center; background:#0a0a0a; }
+  .tip { height:16px; line-height:16px; font-size:9px; color:var(--ink-tertiary); text-align:center; background:var(--canvas); border-top:1px solid var(--hairline); }
   .qrwrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#fff; }
-  .qrwrap img { image-rendering:pixelated; }
+  .qrwrap img { image-rendering:pixelated; max-width:100%; }
   .qrlabel { font-size:10px; color:#000; margin-top:3px; max-width:230px; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; }
-  .body { flex:1; overflow:hidden; padding:6px; font-size:11px; line-height:1.35; }
-  .body h3 { font-size:11px; color:var(--accent); margin:5px 0 2px; }
+  .qrperson { display:flex; align-items:center; gap:5px; margin-bottom:5px; max-width:220px; }
+  .qrperson img { width:16px; height:16px; border-radius:3px; }
+  .qrperson b { font-size:12px; color:#000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .body { flex:1; overflow:hidden; padding:8px; font-size:11px; line-height:1.4; }
+  .body h3 { font-size:10px; letter-spacing:0.4px; text-transform:uppercase; font-weight:600; color:var(--accent); margin:6px 0 2px; }
   .body ul { margin-left:14px; }
   .body li { margin-bottom:3px; }
   .center { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column;
-    gap:8px; padding:10px; text-align:center; font-size:12px; color:#aaa; }
-  .spin { width:20px; height:20px; border:3px solid #333; border-top-color:var(--accent); border-radius:50%;
+    gap:8px; padding:10px; text-align:center; font-size:12px; color:var(--ink-muted); }
+  .spin { width:20px; height:20px; border:3px solid var(--hairline); border-top-color:var(--accent); border-radius:50%;
     animation:sp .8s linear infinite; }
   @keyframes sp { to { transform:rotate(360deg); } }
   body.loading .hdr { border-bottom-color:#ff0; }
-  .daydiv { padding:6px 6px 3px; font-size:9px; letter-spacing:1px; color:var(--accent); border-bottom:1px solid #333; background:#0a0a0a; position:sticky; top:0; }
+  .daydiv { padding:6px 6px 3px; font-size:9px; font-weight:600; letter-spacing:1px; color:var(--accent); border-bottom:1px solid var(--hairline); background:var(--surface-2); position:sticky; top:0; }
 </style>
 </head>
 <body>
@@ -53,28 +88,33 @@
     <div class="tip">scroll · tap/PTT select</div>
   </div>
   <div class="screen" id="qr">
-    <div class="hdr" id="qrHdr">QR</div>
-    <div class="qrwrap"><div id="qrBox"></div><div class="qrlabel" id="qrLabel"></div></div>
+    <div class="hdr" id="qrHdr"><span class="hdr-text">QR</span></div>
+    <div class="qrwrap"><div id="qrPersonRow" class="qrperson"></div><div id="qrBox"></div><div class="qrlabel" id="qrLabel"></div></div>
     <div class="tip">hold PTT / swipe → back</div>
   </div>
   <div class="screen" id="sched">
-    <div class="hdr">SCHEDULE <span id="schedCount" style="font-weight:normal;color:#888"></span></div>
+    <div class="hdr">SCHEDULE <span id="schedCount" style="font-weight:normal;color:var(--ink-muted)"></span></div>
     <div class="list" id="schedList"></div>
     <div class="tip">PTT = open · scroll</div>
   </div>
   <div class="screen" id="sess">
-    <div class="hdr" id="sessHdr">SESSION</div>
+    <div class="hdr" id="sessHdr"><span class="hdr-text">SESSION</span></div>
     <div class="body" id="sessBody"></div>
     <div class="list" id="sessList" style="flex:0 0 auto"></div>
     <div class="tip">PTT select · hold back</div>
   </div>
+  <div class="screen" id="intellist">
+    <div class="hdr">SAVED INTEL</div>
+    <div class="list" id="intelListBody"></div>
+    <div class="tip">PTT = view · scroll</div>
+  </div>
   <div class="screen" id="intel">
-    <div class="hdr">INTEL</div>
+    <div class="hdr" id="intelHdr"><span class="hdr-text">INTEL</span></div>
     <div class="body" id="intelBody"><div class="center"><div class="spin"></div><div>Building intel…</div></div></div>
     <div class="tip">scroll · hold PTT back</div>
   </div>
   <div class="screen" id="msg">
-    <div class="hdr" id="msgHdr">INFO</div>
+    <div class="hdr" id="msgHdr"><span class="hdr-text">INFO</span></div>
     <div class="center" id="msgBody"></div>
     <div class="tip">hold PTT / swipe → back</div>
   </div>
@@ -125,6 +165,22 @@ var expect = null;        // LLM sub-step state machine
 
 // ---------- helpers ----------
 function $(id){ return document.getElementById(id); }
+// Set a header's text; if it doesn't fit the 240px bar, slide it into view and back on a loop
+// instead of hard-clipping (agenda-derived session times and custom landing labels can run long).
+function setHdrText(el, text){
+  var inner = el.querySelector('.hdr-text');
+  if (!inner) { el.textContent = text; return; }
+  inner.classList.remove('scrolling');
+  inner.style.removeProperty('--hdr-dist');
+  inner.textContent = text;
+  requestAnimationFrame(function(){
+    var overflow = inner.scrollWidth - el.clientWidth;
+    if (overflow > 4){
+      inner.style.setProperty('--hdr-dist', (-(overflow + 10)) + 'px');
+      inner.classList.add('scrolling');
+    }
+  });
+}
 function show(id){
   document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
   $(id).classList.add('on');
@@ -170,7 +226,12 @@ function goBack(){
   if (curScreen === 'home') return;
   if (curScreen === 'scan'){ stopScan(); goHome(); return; }
   if (curScreen === 'sess'){ if (sessFromScan){ sessFromScan = false; goHome(); } else openSchedule(); return; }
-  if (curScreen === 'intel'){ show(backTo==='sess' ? 'sess' : 'home'); if(curScreen==='sess') registerList($('sessList')); return; }
+  if (curScreen === 'intel'){
+    if (backTo === 'sess'){ show('sess'); registerList($('sessList')); }
+    else if (backTo === 'intellist'){ show('intellist'); registerList($('intelListBody')); }
+    else { goHome(); }
+    return;
+  }
   goHome();
 }
 function loading(on){ document.body.classList.toggle('loading', !!on); }
@@ -196,7 +257,7 @@ function startCountdown(hostEl, sec){
   cd.style.cssText = 'font-size:26px;font-weight:bold;color:var(--accent);margin-top:8px';
   cd.textContent = sec;
   var note = document.createElement('div');
-  note.style.cssText = 'font-size:10px;color:#888';
+  note.style.cssText = 'font-size:10px;color:var(--ink-muted)';
   note.textContent = 'seconds — waking free host';
   hostEl.appendChild(cd); hostEl.appendChild(note);
   var t = setInterval(function(){
@@ -207,13 +268,13 @@ function startCountdown(hostEl, sec){
   _wakeTimers.push(t);
 }
 function wakeStart(sec){
-  $('msgHdr').textContent = 'WAKING SERVER';
+  setHdrText($('msgHdr'), 'WAKING SERVER');
   $('msgBody').innerHTML = '<div class="spin"></div><div style="margin-top:8px">Free host was asleep.</div>';
   show('msg'); selItems = [];
   startCountdown($('msgBody'), sec);
 }
 function toast(title, text){
-  $('msgHdr').textContent = title;
+  setHdrText($('msgHdr'), title);
   $('msgBody').innerHTML = text;
   show('msg'); selItems = [];
 }
@@ -320,27 +381,32 @@ function mkRow(bullet, t1, t2, fn, favMark){
   return r;
 }
 function applyBrand(){
-  document.documentElement.style.setProperty('--accent', cfg.brandColor || '#ff6600');
+  document.documentElement.style.setProperty('--accent', cfg.brandColor || '#5e6ad2');
   $('brandLabel').textContent = (cfg.brandName || 'CONF COMPANION').toUpperCase().slice(0, 26);
 }
 function renderHome(){
   applyBrand();
   var L = $('homeList'); L.innerHTML = '';
-  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'quick connect (?fromQR=1)' : 'add handle on phone (Pair)', showLinkedIn));
-  L.appendChild(mkRow('◨', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
+  L.appendChild(mkRow('in', 'LinkedIn QR', cfg.linkedin ? 'tap to quick connect on LinkedIn' : 'add handle on phone (Pair)', showLinkedIn));
+  L.appendChild(mkRow('↗', cfg.landingLabel || 'Landing page QR', cfg.landing ? 'share link' : 'not set', showLanding));
   var favN = Object.keys(favs).filter(function(k){ return favs[k]; }).length;
-  L.appendChild(mkRow('S', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
-  L.appendChild(mkRow('i', 'Prospect intel', cfg.companySummary ? 'ready' : 'scan company site in setup', openIntelPick));
-  L.appendChild(mkRow('⛓', 'Pair phone', 'QR → setup on phone', showPairQR));
+  L.appendChild(mkRow('▦', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
+  var intelN = Object.keys(cfg.intel || {}).length;
+  L.appendChild(mkRow('✦', 'Prospect intel', !(cfg.sessions||[]).length ? 'import a schedule first' : (intelN ? intelN + ' saved — tap to view' : 'tap a session to generate'), openIntelPick));
+  L.appendChild(mkRow('↔', 'Pair phone', 'QR → setup on phone', showPairQR));
   L.appendChild(mkRow('⟳', 'Sync', BACKEND.replace(/^https?:\/\//,''), function(){ sync(false); }));
   show('home'); registerList(L);
 }
-function renderQR(title, data, label){
-  $('qrHdr').textContent = title;
+function renderQR(title, data, label, personHtml){
+  setHdrText($('qrHdr'), title);
+  $('qrPersonRow').innerHTML = personHtml || '';
   var box = $('qrBox'); box.innerHTML = '';
   try {
     var q = window.qrcode(0, 'M'); q.addData(data); q.make();
-    box.innerHTML = q.createImgTag(3, 4);
+    // Size to the data instead of a fixed cellSize, so short URLs render clearly larger
+    // on the 240px screen instead of a tiny cluster of modules.
+    var cell = Math.max(3, Math.min(8, Math.floor(180 / q.getModuleCount())));
+    box.innerHTML = q.createImgTag(cell, 2);
   } catch(e){ box.innerHTML = '<div style="color:#000;font-size:11px">QR error</div>'; }
   $('qrLabel').textContent = label || data;
   show('qr'); selItems = [];
@@ -354,7 +420,10 @@ function liDeepLink(raw){
 function showLinkedIn(){
   if (!cfg.linkedin) return showPairQR();
   var link = liDeepLink(cfg.linkedin);
-  renderQR('LINKEDIN — ' + (cfg.name||'connect'), link, link.replace(/^https?:\/\/(www\.)?/,''));
+  var bits = [cfg.name, cfg.title].filter(Boolean).map(esc).join(' · ');
+  var fav = cfg.faviconUrl ? '<img src="' + esc(cfg.faviconUrl) + '" onerror="this.remove()">' : '';
+  var person = (fav || bits) ? fav + (bits ? '<b>' + bits + '</b>' : '') : '';
+  renderQR('LINKEDIN', link, link.replace(/^https?:\/\/(www\.)?/,''), person);
 }
 function showLanding(){
   if (!cfg.landing) return toast('SETUP NEEDED', 'Add a landing page URL in setup:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
@@ -427,7 +496,7 @@ function onScanned(data){
   var isLI = isLinkedInUrl(data);
   // confirm screen with save row
   sessFromScan = true;
-  $('sessHdr').textContent = isLI ? 'LINKEDIN FOUND' : 'LINK FOUND';
+  setHdrText($('sessHdr'), isLI ? 'LINKEDIN FOUND' : 'LINK FOUND');
   $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(data.replace(/^https?:\/\/(www\.)?/,'').slice(0,80)) + '</b>' +
     (isLI ? '' : '<div style="color:#fa0;margin-top:3px">⚠ not a linkedin.com link</div>');
   var L = $('sessList'); L.innerHTML = '';
@@ -470,8 +539,8 @@ function openSchedule(){
     addRow(s);
   });
   function addRow(s){
-    L.appendChild(mkRow(s.time.split(/[-–]/)[0].replace(/^[A-Za-z]{3}\s+\d{1,2}\s+/,'').replace(/[APMapm\s]/g,'').slice(0,5) || '·',
-      s.title, s.time + (s.speaker ? ' · ' + s.speaker : ''),
+    L.appendChild(mkRow(timeBadge(s.time),
+      s.title, s.speaker || '',
       function(){ openSession(s); }, !!favs[s.id]));
   }
   var favN = favSs.length;
@@ -480,31 +549,60 @@ function openSchedule(){
 }
 function openSession(s){
   sessFromScan = false;
-  $('sessHdr').textContent = s.time;
+  setHdrText($('sessHdr'), s.time);
   $('sessBody').innerHTML = '<b style="font-size:12px">' + esc(s.title) + '</b>' +
-    (s.speaker ? '<div style="color:#999;margin-top:3px">' + esc(s.speaker) + '</div>' : '') +
-    (s.desc ? '<div style="color:#777;font-size:10px;margin-top:4px">' + esc(s.desc.slice(0,220)) + '</div>' : '');
+    (s.speaker ? '<div style="color:var(--ink-muted);margin-top:3px">' + esc(s.speaker) + '</div>' : '') +
+    (s.desc ? '<div style="color:var(--ink-tertiary);font-size:10px;margin-top:4px">' + esc(s.desc.slice(0,220)) + '</div>' : '');
   var L = $('sessList'); L.innerHTML = '';
   L.appendChild(mkRow('★', favs[s.id] ? 'Unfavorite' : 'Favorite', null, function(){
     favs[s.id] = !favs[s.id]; saveLocal(); pushFavs(); openSession(s);
   }, !!favs[s.id]));
-  L.appendChild(mkRow('i', 'Intel on this prospect', s.speaker || 'speaker/company', function(){ runIntel(s); }));
+  L.appendChild(mkRow('✦', 'Intel on this prospect', s.speaker || 'speaker/company', function(){ runIntel(s); }));
   show('sess'); registerList(L);
 }
 function esc(s){ var d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+// Pull a short "H:MM" for the schedule-row time badge out of whatever s.time looks like —
+// searching for the pattern anywhere is far more robust than stripping a prefix, since the
+// prefix shape varies (day abbreviations of different lengths, full day names, none at all).
+// A previous version anchored on a fixed "3 letters + 1-2 digits" prefix, which not only
+// missed longer day names ("Monday" produced "ondy9") but didn't even match the structured
+// parser's own "Mon 9:00 AM–9:45 AM" shape (no digit-only date between the day and the time).
+function timeBadge(t){
+  var m = String(t || '').match(/\d{1,2}:\d{2}/);
+  return m ? m[0] : (String(t || '').slice(0, 5) || '·');
+}
 
 // ---------- intel ----------
+// Not gated on cfg.companySummary — the person running the R1 already knows their own
+// pitch, so intel is still useful without a scanned company summary (runIntel/the prompt
+// just omits that context when it's empty).
 function openIntelPick(){
-  if (!cfg.companySummary) return toast('SETUP NEEDED', 'Scan YOUR company site first (setup page) so intel knows what you sell.');
   if (!(cfg.sessions||[]).length) return toast('NO SCHEDULE', 'Import a schedule first — intel targets a session speaker.');
-  openSchedule(); // pick a session, then choose Intel inside
-  toast('PICK A SESSION', 'Open a session from the schedule,<br>then choose <b>Intel on this prospect</b>.');
+  var withIntel = (cfg.sessions||[]).filter(function(s){ return cfg.intel && cfg.intel[s.id]; });
+  if (!withIntel.length){
+    openSchedule(); // pick a session, then choose Intel inside
+    toast('PICK A SESSION', 'Open a session from the schedule,<br>then choose <b>Intel on this prospect</b>.');
+    return;
+  }
+  var L = $('intelListBody'); L.innerHTML = '';
+  withIntel.forEach(function(s){
+    L.appendChild(mkRow('✦', s.title, s.speaker || '', function(){ viewSavedIntel(s); }));
+  });
+  show('intellist'); registerList(L);
+}
+function viewSavedIntel(s){
+  backTo = 'intellist';
+  intelScroll = 0;
+  setHdrText($('intelHdr'), 'INTEL — ' + s.title);
+  renderIntel(cfg.intel[s.id]);
+  show('intel'); selItems = [];
 }
 var curIntelFor = null; // session currently being analyzed — so a late LLM reply can be pushed to phone
 function runIntel(s){
   backTo = 'sess';
   intelScroll = 0;
   curIntelFor = s;
+  setHdrText($('intelHdr'), 'INTEL');
   $('intelBody').innerHTML = '<div class="center"><div class="spin"></div><div>Building intel…</div></div>';
   show('intel'); selItems = [];
   loading(true);
@@ -516,10 +614,12 @@ function runIntel(s){
   .then(function(j){
     clearTimers();
     loading(false);
-    var prompt = 'I work in sales. MY COMPANY (what we sell): """' + (j.myCompany||'').slice(0,1800) + '"""' +
+    var prompt = 'I work in sales. ' +
+      (j.myCompany ? 'MY COMPANY (what we sell): """' + j.myCompany.slice(0,1800) + '""". ' : '') +
       'PROSPECT I am about to talk to at a conference: "' + (j.prospect||'') + '"' +
       (j.prospectText ? '. Their site says: """' + j.prospectText.slice(0,1200) + '"""' : '') +
-      '. Give me conversation intel. Respond ONLY with valid JSON: {"who":"1 line on who they likely are","angle":"1-2 lines: why MY product is relevant to them","openers":["q1","q2","q3"],"avoid":"1 thing not to say"}';
+      '. Give me conversation intel' + (j.myCompany ? '' : ' (I know my own pitch, just help me read the prospect)') +
+      '. Respond ONLY with valid JSON: {"who":"1 line on who they likely are","angle":"1-2 lines on a relevant angle to open with","openers":["q1","q2","q3"],"avoid":"1 thing not to say"}';
     if (typeof PluginMessageHandler !== 'undefined'){
       expect = 'intel';
       PluginMessageHandler.postMessage(JSON.stringify({ message: prompt, useLLM: true, wantsR1Response: false }));
@@ -542,7 +642,7 @@ function renderIntelFallback(j){
   $('intelBody').innerHTML =
     '<h3>PROSPECT</h3><div>' + esc(j.prospect) + '</div>' +
     '<h3>YOUR PITCH BASE</h3><div>' + esc((j.myCompany||'').slice(0,600)) + '</div>' +
-    '<div style="color:#666;margin-top:6px">(LLM unavailable — raw context shown)</div>';
+    '<div style="color:var(--ink-tertiary);margin-top:6px">(LLM unavailable — raw context shown)</div>';
 }
 // R1 does the LLM analysis; push the result to the server so the phone mirror (which has
 // no on-device LLM of its own) picks it up on its next sync. Keyed by session id.
@@ -584,12 +684,26 @@ window.addEventListener('wheel', function(e){ moveSel(e.deltaY<0?-1:1); }, {pass
 window.addEventListener('longPressStart', function(){ goBack(); });
 window.addEventListener('keydown', function(e){ if(e.key==='Enter') activate(); if(e.key==='Escape') goBack();
   if(e.key==='ArrowUp') moveSel(-1); if(e.key==='ArrowDown') moveSel(1); });
-var _touchX = null;
-window.addEventListener('touchstart', function(e){ _touchX = e.touches[0].clientX; }, {passive:true});
+// Swipe-back must be direction-locked: a vertical scroll on this small screen easily drifts
+// 60px+ horizontally too, which used to fire a false "back" mid-scroll. Require the motion to
+// be clearly horizontal (dx more than 2x the vertical drift) before treating it as a swipe.
+var _touchX = null, _touchY = null;
+window.addEventListener('touchstart', function(e){ _touchX = e.touches[0].clientX; _touchY = e.touches[0].clientY; }, {passive:true});
 window.addEventListener('touchend', function(e){
-  if (_touchX !== null && e.changedTouches[0].clientX - _touchX > 60) goBack();
-  _touchX = null;
+  if (_touchX !== null && _touchY !== null){
+    var dx = e.changedTouches[0].clientX - _touchX;
+    var dy = e.changedTouches[0].clientY - _touchY;
+    if (dx > 60 && Math.abs(dy) < dx * 0.5) goBack();
+  }
+  _touchX = null; _touchY = null;
 }, {passive:true});
+// Explicit, non-gesture back target: tap any non-home header. Swipe stays as a secondary
+// option now that it's fixed, but a visible tap target is the more reliable primary one on a
+// screen this dense with touch targets.
+document.querySelectorAll('.screen:not(#home) .hdr').forEach(function(h){
+  h.classList.add('back');
+  h.addEventListener('click', function(){ goBack(); });
+});
 
 // ---------- #debug overlay ----------
 var DEBUG = /[#&?]debug/.test(location.href);

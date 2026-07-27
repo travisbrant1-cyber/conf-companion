@@ -8,44 +8,63 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ConfComp">
 <link rel="apple-touch-icon" href="/icon-192.png">
-<meta name="theme-color" content="#ff6600">
+<meta name="theme-color" content="#5e6ad2">
 <title>Conf Companion — Setup</title>
 <style>
-  :root { --accent: #ff6600; }
-  body { font-family:Helvetica,Arial,sans-serif; background:#111; color:#eee; max-width:520px;
-    margin:0 auto; padding:20px 16px 60px; }
-  h1 { font-size:20px; color:var(--accent); }
-  h2 { font-size:14px; margin:26px 0 8px; border-bottom:1px solid #333; padding-bottom:4px; }
-  label { display:block; font-size:12px; color:#999; margin:10px 0 3px; }
-  input { width:100%; padding:10px; border:1px solid #444; background:#000; color:#fff;
-    border-radius:6px; font-size:14px; }
+  /* Design language: Linear (linear.app), via the design-md skill — see
+     ~/.claude/skills/design-md. Section titles (h2) stay plain ink, not accent: the
+     source spec's own card/section titles are ink-colored, and reserving the accent for
+     the wordmark, links, focus rings, and the primary CTA is what keeps it reading as
+     intentional instead of decorated everywhere. */
+  :root {
+    --accent: #5e6ad2;
+    --accent-hover: #828fff;
+    --on-accent: #ffffff;
+    --canvas: #010102;
+    --surface-1: #0f1011;
+    --surface-2: #141516;
+    --hairline: #23252a;
+    --hairline-strong: #34343a;
+    --ink: #f7f8f8;
+    --ink-muted: #8a8f98;
+    --ink-tertiary: #62666d;
+  }
+  body { font-family:Inter,-apple-system,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--canvas); color:var(--ink); max-width:520px;
+    margin:0 auto; padding:20px 16px 60px; -webkit-font-smoothing:antialiased; }
+  h1 { font-size:22px; font-weight:600; letter-spacing:-0.4px; color:var(--accent); }
+  h2 { font-size:14px; font-weight:600; margin:26px 0 8px; border-bottom:1px solid var(--hairline); padding-bottom:4px; }
+  label { display:block; font-size:12px; color:var(--ink-muted); margin:10px 0 3px; }
+  input { width:100%; padding:10px; border:1px solid var(--hairline-strong); background:var(--surface-1); color:var(--ink);
+    border-radius:8px; font-size:14px; }
+  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(94,106,210,.5); }
   input[type=color] { width:60px; height:40px; padding:2px; cursor:pointer; }
-  button { margin-top:10px; padding:10px 18px; background:var(--accent); color:#000; border:none;
-    border-radius:6px; font-weight:bold; font-size:14px; }
+  button { margin-top:10px; padding:10px 18px; background:var(--accent); color:var(--on-accent); border:none;
+    border-radius:8px; font-weight:600; font-size:14px; }
   button:disabled { opacity:.5; }
-  .out { font-size:12px; color:#8f8; margin-top:8px; white-space:pre-wrap; }
+  .out { font-size:12px; color:#27a644; margin-top:8px; white-space:pre-wrap; }
   .out.err { color:#f66; }
-  .sess { font-size:12px; padding:6px 8px; border-bottom:1px solid #222; }
+  .sess { font-size:12px; padding:6px 8px; border-bottom:1px solid var(--hairline); }
   .sess b { color:var(--accent); }
-  .banner { background:#222; border:1px solid var(--accent); border-radius:8px; padding:10px 12px;
+  .banner { background:var(--surface-1); border:1px solid var(--accent); border-radius:8px; padding:10px 12px;
     font-size:13px; margin:14px 0; }
   .banner b { color:var(--accent); }
-  .pill { font-size:11px; color:#0c0; background:#052; border-radius:10px; padding:2px 8px; }
+  .pill { font-size:11px; color:#27a644; background:#0d1f12; border-radius:10px; padding:2px 8px; }
   .swatch-row { display:flex; align-items:center; gap:10px; }
-  .swatch-row .hint { font-size:12px; color:#888; }
+  .swatch-row .hint { font-size:12px; color:var(--ink-muted); }
   .swatches { display:flex; gap:8px; flex-wrap:wrap; }
-  .swatch { width:32px; height:32px; border-radius:6px; border:2px solid #444; cursor:pointer; padding:0; }
-  .swatch:hover { border-color:#888; }
+  .swatch { width:32px; height:32px; border-radius:8px; border:2px solid var(--hairline-strong); cursor:pointer; padding:0; }
+  .swatch:hover { border-color:var(--ink-muted); }
 </style>
 </head>
 <body>
 <h1>Conf Companion — Setup</h1>
 <p style="font-size:13px;color:#888">Fill this in from your phone/PC. The R1 pulls it on Sync.
   <span class="pill" id="pairPill" style="display:none"></span></p>
-<button onclick="viewPhone()" style="background:#333;color:#fff">📱 View phone mirror</button>
+<button onclick="viewPhone()" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--hairline-strong)">📱 View phone mirror</button>
 <div class="banner" id="a2hs" style="display:none">
   📌 <b>Save this page:</b> add it to your home screen so your conference setup is one tap away.<br>
-  <span style="color:#999;font-size:12px" id="a2hsHow"></span>
+  <span style="color:var(--ink-muted);font-size:12px" id="a2hsHow"></span>
 </div>
 
 <h2>Your company (intel base)</h2>
@@ -66,7 +85,7 @@
 <label>Event / company label</label><input id="brandName" placeholder="Acme @ SaaStr 2026" maxlength="40">
 <label>Accent color</label>
 <div class="swatch-row">
-  <input type="color" id="brandColor" value="#ff6600">
+  <input type="color" id="brandColor" value="#5e6ad2">
   <span class="hint">used for headers, buttons, favorites, QR labels</span>
 </div>
 <div id="faviconRow" style="display:none;margin-top:10px">
@@ -79,13 +98,14 @@
 
 <h2>Networking</h2>
 <label>Your name (shown on QR screen)</label><input id="name">
+<label>Title / role (optional, shown next to your name)</label><input id="title" placeholder="Sales Director">
 <label>LinkedIn handle (no spaces) — we add ?fromQR=1</label><input id="linkedin" placeholder="travis-brant">
 <label>Landing page URL (optional)</label><input id="landing" placeholder="yourco.com/demo">
 <label>Landing page label</label><input id="landingLabel" placeholder="Product demo">
 
-<div style="border-top:2px solid var(--accent); margin-top:24px; padding-top:14px; display:flex; gap:10px;">
+<div style="border-top:1px solid var(--hairline-strong); margin-top:24px; padding-top:14px; display:flex; gap:10px;">
   <button onclick="saveAll()" style="flex:2">💾 Save all</button>
-  <button onclick="syncPhone()" style="flex:1; background:#333; color:#fff">⟳ Sync</button>
+  <button onclick="syncPhone()" style="flex:1; background:var(--surface-2); color:var(--ink); border:1px solid var(--hairline-strong)">⟳ Sync</button>
 </div>
 <div class="out" id="outBasic" style="margin-top:8px"></div>
 
@@ -127,7 +147,7 @@ function normalizeLinkedIn(v){
 })();
 // ---------- Branding: live preview of the accent color as you pick ----------
 function applyBrand(color){
-  document.documentElement.style.setProperty('--accent', color || '#ff6600');
+  document.documentElement.style.setProperty('--accent', color || '#5e6ad2');
 }
 $('brandColor').addEventListener('input', function(){ applyBrand(this.value); });
 // Add-to-home-screen prompt
@@ -187,8 +207,8 @@ async function load(){
     var c = await api('/api/config');
     c = await restoreIfEmpty(c);
     backupLocal(c);
-    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
-    $('brandColor').value = c.brandColor || '#ff6600';
+    ['name','title','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    $('brandColor').value = c.brandColor || '#5e6ad2';
     applyBrand($('brandColor').value);
     if ((c.sessions||[]).length) preview(c.sessions);
     if (c.companySummary) out('outCo', 'Company intel saved (' + c.companySummary.length + ' chars).');
@@ -199,7 +219,10 @@ async function load(){
 async function fetchBrandColors(u){
   try {
     var j = await api('/api/brandcolors', { url: u });
-    if (j.faviconUrl && j.faviconUrl.indexOf('http') === 0) $('faviconImg').src = j.faviconUrl;
+    if (j.faviconUrl && j.faviconUrl.indexOf('http') === 0) {
+      $('faviconImg').src = j.faviconUrl;
+      api('/api/config', { faviconUrl: j.faviconUrl }); // so the R1 can show it on the LinkedIn QR screen
+    }
     var row = $('swatches'); row.innerHTML = '';
     (j.swatches||[]).forEach(function(hex){
       var b = document.createElement('button');
@@ -215,13 +238,14 @@ async function fetchBrandColors(u){
 async function saveAll(){
   var payload = {
     name: $('name').value.trim(),
+    title: $('title').value.trim(),
     linkedin: normalizeLinkedIn($('linkedin').value.trim()),
     landing: normalizeUrl($('landing').value.trim()),
     landingLabel: $('landingLabel').value.trim(),
     scheduleUrl: normalizeUrl($('scheduleUrl').value.trim()),
     companyUrl: normalizeUrl($('companyUrl').value.trim()),
     brandName: $('brandName').value.trim().slice(0, 40),
-    brandColor: $('brandColor').value || '#ff6600'
+    brandColor: $('brandColor').value || '#5e6ad2'
   };
   ['linkedin','landing','scheduleUrl','companyUrl'].forEach(function(id){ $(id).value = payload[id]; });
   try {
@@ -235,8 +259,8 @@ async function syncPhone(){
   try {
     var c = await api('/api/config');
     backupLocal(c);
-    ['name','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
-    $('brandColor').value = c.brandColor || '#ff6600';
+    ['name','title','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ if(c[k]) $(k).value = c[k]; });
+    $('brandColor').value = c.brandColor || '#5e6ad2';
     applyBrand($('brandColor').value);
     if ((c.sessions||[]).length) preview(c.sessions);
     out('outBasic', 'Synced ✓ from server — ' + (c.sessions||[]).length + ' sessions, rev ' + (c.rev||0) + '.');
@@ -248,7 +272,7 @@ function preview(ss){
     return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
   }).join('');
   if (rest > 0) html += '<div class="sess" id="moreSess" onclick="showAll()" style="color:var(--accent);cursor:pointer">▸ show '+rest+' more</div>';
-  else html += '<div class="sess" style="color:#666" onclick="hideAll()">▴ collapse</div>';
+  else html += '<div class="sess" style="color:var(--ink-tertiary)" onclick="hideAll()">▴ collapse</div>';
   $('sessPreview').innerHTML = html;
 }
 function showAll(){
@@ -263,7 +287,7 @@ function preview(ss, all){
     return '<div class="sess"><b>'+s.time+'</b> '+s.title+(s.speaker?' — <i>'+s.speaker+'</i>':'')+'</div>';
   }).join('');
   if (!all && rest > 0) html += '<div class="sess" style="color:var(--accent);cursor:pointer" onclick="showAll()">▸ show '+rest+' more</div>';
-  else if (all) html += '<div class="sess" style="color:#666;cursor:pointer" onclick="preview([])">▴ collapse</div>';
+  else if (all) html += '<div class="sess" style="color:var(--ink-tertiary);cursor:pointer" onclick="preview([])">▴ collapse</div>';
   $('sessPreview').innerHTML = html;
 }
 function hideAll(){ preview([]); }
