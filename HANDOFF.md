@@ -448,3 +448,29 @@ node "%LOCALAPPDATA%\Temp\hermes-verify-cc.js"
 - Microsoft-style indexed-BMP-in-ICO favicons still don't decode (returns empty
   swatches, not a crash) — low priority, PNG/PNG-in-ICO covers the vast
   majority of real sites.
+- **Custom production domain — requested, blocked on the user registering one.**
+  Currently on `conf-companion.onrender.com`. The app itself needs zero code
+  changes to move (R1/phone/setup all derive their backend from
+  `location.origin`, nothing is hardcoded) — once a domain exists, the
+  remaining steps are: add it under the Render service's Custom Domains
+  (dashboard, not `render.yaml`), point the registrar's DNS at what Render
+  gives you, wait for Render's automatic TLS cert, then regenerate
+  `install-qr.png`/`.json` with the new URL and update the "Live:" line below.
+  None of that can happen until a domain is actually purchased — that's a real
+  transaction on the user's own payment method, not something to do for them.
+
+## R1-side delete button (2026-07-26, uncommitted)
+Added the same "start fresh" capability from setup.html's Danger Zone
+directly to the R1, via a new home row ("Delete everything", red bullet —
+the one deliberate break from the single-accent design system, matching
+setup.html's red danger-zone treatment). Requires an explicit second
+selection on a dedicated `#delconfirm` screen (Yes/Cancel as real rows, not a
+single tap) — same reasoning as before for why this wasn't just a direct
+action: too easy to overshoot on a scroll-wheel-driven UI for something this
+destructive. On confirm: calls the same `DELETE /api/config` endpoint,
+resets `cfg`/`favs` locally to the pristine default immediately (matching
+what the server now returns) rather than waiting for the next poll, then
+toasts and returns home. Verified live: seeded test data, walked Delete →
+Cancel (confirmed nothing was touched), then Delete → Yes (confirmed both
+the R1 UI and the server's `/api/config` response came back to the pristine
+default).

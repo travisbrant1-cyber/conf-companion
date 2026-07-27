@@ -128,6 +128,12 @@
     <div class="center" id="msgBody"></div>
     <div class="tip">hold PTT / swipe → back</div>
   </div>
+  <div class="screen" id="delconfirm">
+    <div class="hdr"><span class="hdr-text" style="color:#f66">DELETE EVERYTHING?</span></div>
+    <div class="body">This permanently erases LinkedIn, schedule, favorites, intel, and talking points for this device. The phone resets too on its next sync. This can't be undone.</div>
+    <div class="list" id="delConfirmList" style="flex:0 0 auto"></div>
+    <div class="tip">PTT select · hold back</div>
+  </div>
   <div class="screen" id="scan">
     <div class="hdr"><span class="dot live" style="background:var(--accent)"></span>SCAN LINKEDIN QR</div>
     <div style="flex:1;position:relative;background:#000;overflow:hidden">
@@ -406,6 +412,9 @@ function renderHome(){
   L.appendChild(mkRow('✦', 'Talking points', !cfg.companySummary ? 'scan company site in setup' : ((cfg.pitchPoints||[]).length ? 'ready — tap to view' : 'tap to generate'), openPitchPoints));
   L.appendChild(mkRow('↔', 'Pair phone', 'QR → setup on phone', showPairQR));
   L.appendChild(mkRow('⟳', 'Sync', BACKEND.replace(/^https?:\/\//,''), function(){ sync(false); }));
+  var delRow = mkRow('✕', 'Delete everything', 'reset this device — start fresh', confirmDeleteEverything);
+  delRow.querySelector('.bullet').style.background = '#c62828'; // red, not the brand accent — this one's destructive
+  L.appendChild(delRow);
   show('home'); registerList(L);
 }
 function renderQR(title, data, label, personHtml){
@@ -526,6 +535,33 @@ function saveScannedLinkedIn(url){
     .catch(function(){ loading(false); toast('SAVED ON R1', 'Stored locally.<br>Server sync failed — will land on next Sync.'); renderHomeSoon(); });
 }
 function renderHomeSoon(){ setTimeout(renderHome, 1600); }
+
+// ---------- delete everything (start fresh) ----------
+// Same DELETE /api/config endpoint setup.html's "Danger zone" uses. Requires an explicit
+// second selection (Yes/Cancel screen) rather than a single tap, same reasoning as keeping
+// this off the R1 home row's direct path — too easy to overshoot on a scroll-wheel UI for
+// something this destructive.
+function confirmDeleteEverything(){
+  var L = $('delConfirmList'); L.innerHTML = '';
+  var yesRow = mkRow('✕', 'Yes, delete everything', 'cannot be undone', doDeleteEverything);
+  yesRow.querySelector('.bullet').style.background = '#c62828';
+  L.appendChild(yesRow);
+  L.appendChild(mkRow('‹', 'Cancel', null, goHome));
+  show('delconfirm'); registerList(L);
+}
+function doDeleteEverything(){
+  toast('DELETING…', 'Please wait.');
+  wakeFetch(BACKEND + '/api/config?d=' + devId, { method: 'DELETE' })
+    .then(function(){
+      cfg = { name:'', linkedin:'', landing:'', landingLabel:'', companyUrl:'', companySummary:'',
+        scheduleUrl:'', sessions:[], favs:{}, intel:{}, pitchPoints:[], brandName:'', brandColor:'#5e6ad2', rev:0 };
+      favs = {};
+      saveLocal();
+      toast('DELETED ✓', 'This device is back to a blank slate.');
+      renderHomeSoon();
+    })
+    .catch(function(e){ toast('ERROR', 'Could not delete: ' + esc(e.message)); });
+}
 var schedDayIndex = -1; // -1 = ALL days; otherwise an index into this call's `days` list
 function openSchedule(){
   var L = $('schedList'); L.innerHTML = '';
