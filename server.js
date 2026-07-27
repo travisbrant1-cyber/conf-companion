@@ -20,7 +20,7 @@ function devPath(id) {
 }
 function loadConfig(id) {
   try { return JSON.parse(fs.readFileSync(devPath(id), 'utf8')); }
-  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, intel: {}, brandName: '', brandColor: '#5e6ad2', rev: 0 }; }
+  catch (e) { return { name: '', linkedin: '', landing: '', landingLabel: '', companyUrl: '', companySummary: '', scheduleUrl: '', sessions: [], favs: {}, intel: {}, pitchPoints: [], brandName: '', brandColor: '#5e6ad2', rev: 0 }; }
 }
 function saveConfig(id, cfg) {
   // Anti disk-fill: bound both the number of device files and their size.
@@ -440,7 +440,7 @@ function send(res, code, body, type) {
   res.writeHead(code, {
     'Content-Type': type || 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store'
   });
@@ -479,6 +479,16 @@ const server = http.createServer(async (req, res) => {
       cfg.rev = (cfg.rev || 0) + 1;
       saveConfig(id, cfg);
       return send(res, 200, { ok: true, rev: cfg.rev });
+    }
+    // "Start fresh": wipe this device's config entirely. loadConfig() falls back to the
+    // pristine default (rev 0) once the file's gone, so the R1's 20s poll picks up the reset
+    // on its own (rev goes from whatever it was down to 0, which is still "changed").
+    if (p === '/api/config' && req.method === 'DELETE') {
+      const id = qd;
+      if (!id) return send(res, 400, { error: 'device id required' });
+      const fp = devPath(id);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      return send(res, 200, { ok: true });
     }
     if (p === '/api/schedule' && req.method === 'POST') {
       const { url, d } = await readBody(req);

@@ -109,6 +109,20 @@
 </div>
 <div class="out" id="outBasic" style="margin-top:8px"></div>
 
+<div style="border-top:1px solid #4a2020; margin-top:28px; padding-top:14px;">
+  <h2 style="color:#f66; border-bottom-color:#4a2020">Danger zone</h2>
+  <p style="font-size:12px;color:var(--ink-muted);margin:0 0 8px">Permanently erases everything for this device — LinkedIn, schedule, favorites, intel, branding. The R1 and phone both go back to a blank first-run state on their next sync. This can't be undone.</p>
+  <button onclick="askReset()" style="background:#3a1414;color:#f66;border:1px solid #5a2020">🗑 Delete everything &amp; start fresh</button>
+  <div id="resetConfirm" style="display:none;margin-top:10px;padding:10px;background:#2a1414;border:1px solid #5a2020;border-radius:8px">
+    <div style="font-size:13px;margin-bottom:8px">Are you sure? This deletes all saved data for this device permanently.</div>
+    <div style="display:flex;gap:8px">
+      <button onclick="doReset()" style="background:#c62828;color:#fff;flex:1;margin-top:0">Yes, delete everything</button>
+      <button onclick="cancelReset()" style="background:var(--surface-2);color:var(--ink);border:1px solid var(--hairline-strong);flex:1;margin-top:0">Cancel</button>
+    </div>
+  </div>
+  <div class="out" id="outReset" style="margin-top:8px"></div>
+</div>
+
 <script>
 function $(id){ return document.getElementById(id); }
 var DEV = new URLSearchParams(location.search).get('d') || localStorage.getItem('cc_dev') || '';
@@ -265,6 +279,24 @@ async function syncPhone(){
     if ((c.sessions||[]).length) preview(c.sessions);
     out('outBasic', 'Synced ✓ from server — ' + (c.sessions||[]).length + ' sessions, rev ' + (c.rev||0) + '.');
   } catch(e){ out('outBasic', 'Error: '+e.message, 1); }
+}
+// ---------- Danger zone: wipe this device's config and start fresh ----------
+function askReset(){ $('resetConfirm').style.display = 'block'; }
+function cancelReset(){ $('resetConfirm').style.display = 'none'; }
+async function doReset(){
+  if (!DEV){ out('outReset', 'No paired device id yet — nothing to delete.', 1); return; }
+  try {
+    var r = await fetch('/api/config?d=' + encodeURIComponent(DEV), { method: 'DELETE' });
+    var j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    try { localStorage.removeItem('cc_backup'); } catch(e){} // don't let the free-tier-reset safety net undo this
+    cancelReset();
+    ['name','title','linkedin','landing','landingLabel','scheduleUrl','companyUrl','brandName'].forEach(function(k){ $(k).value = ''; });
+    $('brandColor').value = '#5e6ad2'; applyBrand('#5e6ad2');
+    $('sessPreview').innerHTML = ''; $('swatches').innerHTML = ''; $('faviconRow').style.display = 'none';
+    out('outCo', ''); out('outSched', '');
+    out('outReset', 'Deleted ✓ — this device is back to a blank slate. The R1 and phone will pick this up on their next sync.');
+  } catch(e){ out('outReset', 'Error: '+e.message, 1); }
 }
 function preview(ss){
   var shown = ss.slice(0,6), rest = ss.length - shown.length;

@@ -47,7 +47,7 @@
     50%, 65% { transform:translateX(var(--hdr-dist, 0)); }
     100% { transform:translateX(0); }
   }
-  .list { flex:1; overflow:hidden; }
+  .list { flex:1; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; }
   .row { min-height:44px; display:flex; align-items:center; padding:0 6px; border-bottom:1px solid var(--hairline);
     font-size:13px; gap:10px; background:var(--surface-1); }
   .row .bullet { width:22px; height:22px; min-width:22px; border-radius:50%; background:var(--accent); color:var(--on-accent);
@@ -78,6 +78,10 @@
   @keyframes sp { to { transform:rotate(360deg); } }
   body.loading .hdr { border-bottom-color:#ff0; }
   .daydiv { padding:6px 6px 3px; font-size:9px; font-weight:600; letter-spacing:1px; color:var(--accent); border-bottom:1px solid var(--hairline); background:var(--surface-2); position:sticky; top:0; }
+  .daytabs { flex:0 0 auto; display:flex; gap:6px; padding:6px; overflow-x:auto; background:var(--surface-2); border-bottom:1px solid var(--hairline); }
+  .daytab { flex:0 0 auto; padding:5px 10px; border-radius:999px; background:var(--surface-1); color:var(--ink-muted);
+    font-size:10px; font-weight:600; white-space:nowrap; border:1px solid var(--hairline-strong); }
+  .daytab.active { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -94,8 +98,9 @@
   </div>
   <div class="screen" id="sched">
     <div class="hdr">SCHEDULE <span id="schedCount" style="font-weight:normal;color:var(--ink-muted)"></span></div>
+    <div class="daytabs" id="dayTabs" style="display:none"></div>
     <div class="list" id="schedList"></div>
-    <div class="tip">PTT = open · scroll</div>
+    <div class="tip" id="schedTip">PTT = open · scroll</div>
   </div>
   <div class="screen" id="sess">
     <div class="hdr" id="sessHdr"><span class="hdr-text">SESSION</span></div>
@@ -112,6 +117,12 @@
     <div class="hdr" id="intelHdr"><span class="hdr-text">INTEL</span></div>
     <div class="body" id="intelBody"><div class="center"><div class="spin"></div><div>Building intel…</div></div></div>
     <div class="tip">scroll · hold PTT back</div>
+  </div>
+  <div class="screen" id="pitch">
+    <div class="hdr" id="pitchHdr"><span class="hdr-text">TALKING POINTS</span></div>
+    <div class="body" id="pitchBody"><div class="center"><div class="spin"></div><div>Building talking points…</div></div></div>
+    <div class="list" id="pitchList" style="flex:0 0 auto"></div>
+    <div class="tip">scroll · PTT select · hold back</div>
   </div>
   <div class="screen" id="msg">
     <div class="hdr" id="msgHdr"><span class="hdr-text">INFO</span></div>
@@ -393,6 +404,7 @@ function renderHome(){
   L.appendChild(mkRow('▦', 'Schedule', (cfg.sessions||[]).length + ' sessions · ' + favN + ' ★', openSchedule));
   var intelN = Object.keys(cfg.intel || {}).length;
   L.appendChild(mkRow('✦', 'Prospect intel', !(cfg.sessions||[]).length ? 'import a schedule first' : (intelN ? intelN + ' saved — tap to view' : 'tap a session to generate'), openIntelPick));
+  L.appendChild(mkRow('✦', 'Talking points', !cfg.companySummary ? 'scan company site in setup' : ((cfg.pitchPoints||[]).length ? 'ready — tap to view' : 'tap to generate'), openPitchPoints));
   L.appendChild(mkRow('↔', 'Pair phone', 'QR → setup on phone', showPairQR));
   L.appendChild(mkRow('⟳', 'Sync', BACKEND.replace(/^https?:\/\//,''), function(){ sync(false); }));
   show('home'); registerList(L);
@@ -515,6 +527,7 @@ function saveScannedLinkedIn(url){
     .catch(function(){ loading(false); toast('SAVED ON R1', 'Stored locally.<br>Server sync failed — will land on next Sync.'); renderHomeSoon(); });
 }
 function renderHomeSoon(){ setTimeout(renderHome, 1600); }
+var schedDayIndex = -1; // -1 = ALL days; otherwise an index into this call's `days` list
 function openSchedule(){
   var L = $('schedList'); L.innerHTML = '';
   var ss = cfg.sessions || [];
@@ -522,9 +535,25 @@ function openSchedule(){
     toast('NO SCHEDULE', 'Import the agenda URL from the setup page:<br><b>' + BACKEND.replace(/^https?:\/\//,'') + '/setup</b>');
     return;
   }
-  // favorites first, then the rest in agenda order with day dividers
-  var favSs = ss.filter(function(s){ return favs[s.id]; });
-  var rest = ss.filter(function(s){ return !favs[s.id]; });
+  // Distinct days, in the order they first appear in the agenda (not alphabetical) — sessions
+  // without a .day (heuristic-parsed schedules) never populate this, so single-day agendas are
+  // unaffected: multiDay stays false and everything behaves exactly as before this feature.
+  var days = [];
+  ss.forEach(function(s){ if (s.day && days.indexOf(s.day) === -1) days.push(s.day); });
+  var multiDay = days.length > 1;
+  if (!multiDay) schedDayIndex = -1;
+  else if (schedDayIndex >= days.length) schedDayIndex = -1; // schedule re-imported with fewer days than before
+
+  renderDayTabs(days, multiDay);
+  $('schedTip').textContent = multiDay ? 'PTT = open · scroll · tap a day above' : 'PTT = open · scroll';
+
+  var showingDay = multiDay && schedDayIndex !== -1;
+  var visible = showingDay ? ss.filter(function(s){ return s.day === days[schedDayIndex]; }) : ss;
+
+  // favorites first, then the rest in agenda order — day dividers only make sense across the
+  // full ALL view, since a single-day view is already homogeneous.
+  var favSs = visible.filter(function(s){ return favs[s.id]; });
+  var rest = visible.filter(function(s){ return !favs[s.id]; });
   function divider(txt){
     var d = document.createElement('div');
     d.className = 'daydiv';
@@ -535,7 +564,7 @@ function openSchedule(){
   favSs.forEach(addRow);
   var lastDay = null;
   rest.forEach(function(s){
-    if (s.day && s.day !== lastDay){ lastDay = s.day; divider(s.day.toUpperCase().slice(0, 30)); }
+    if (!showingDay && s.day && s.day !== lastDay){ lastDay = s.day; divider(s.day.toUpperCase().slice(0, 30)); }
     addRow(s);
   });
   function addRow(s){
@@ -543,9 +572,31 @@ function openSchedule(){
       s.title, s.speaker || '',
       function(){ openSession(s); }, !!favs[s.id]));
   }
+  // Prev/next-day as real rows at the end of the list, not just the tabs above — reachable by
+  // scroll-wheel/PTT too, not touch-only, since that's the one part of this the hardware nav
+  // needs to reach without a horizontal-tab equivalent.
+  if (showingDay){
+    if (schedDayIndex > 0) L.appendChild(mkRow('‹', 'Previous day', days[schedDayIndex - 1].toUpperCase().slice(0, 30), function(){ schedDayIndex--; openSchedule(); }));
+    if (schedDayIndex < days.length - 1) L.appendChild(mkRow('›', 'Next day', days[schedDayIndex + 1].toUpperCase().slice(0, 30), function(){ schedDayIndex++; openSchedule(); }));
+  }
   var favN = favSs.length;
-  $('schedCount').textContent = ss.length + ' · ' + favN + '★';
+  $('schedCount').textContent = visible.length + ' · ' + favN + '★';
   show('sched'); registerList(L);
+}
+function renderDayTabs(days, multiDay){
+  var row = $('dayTabs');
+  row.innerHTML = '';
+  if (!multiDay){ row.style.display = 'none'; return; }
+  row.style.display = 'flex';
+  function tab(label, idx){
+    var b = document.createElement('div');
+    b.className = 'daytab' + (schedDayIndex === idx ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', function(){ schedDayIndex = idx; openSchedule(); });
+    row.appendChild(b);
+  }
+  tab('ALL', -1);
+  days.forEach(function(d, i){ tab(d.toUpperCase().slice(0, 10), i); });
 }
 function openSession(s){
   sessFromScan = false;
@@ -656,6 +707,53 @@ function pushIntel(sessionId, o){
     body: JSON.stringify({ d: devId, intel: patch })
   }).catch(function(){});
 }
+
+// ---------- company talking points ----------
+// Same shape as prospect intel: R1 has the only on-device LLM, so it does the analysis and
+// pushes the result to the server; the phone mirror just displays whatever's landed. Unlike
+// intel this isn't per-session — one company, so one cached result, with an explicit
+// "Regenerate" action instead of re-running the LLM every time you just want to glance at it.
+function openPitchPoints(){
+  if (!cfg.companySummary) return toast('SETUP NEEDED', 'Scan your company site first (setup page) so there\'s something to build talking points from.');
+  show('pitch'); selItems = [];
+  if (cfg.pitchPoints && cfg.pitchPoints.length) renderPitchPoints(cfg.pitchPoints);
+  else runPitchPoints();
+}
+function runPitchPoints(){
+  setHdrText($('pitchHdr'), 'TALKING POINTS');
+  $('pitchBody').innerHTML = '<div class="center"><div class="spin"></div><div>Building talking points…</div></div>';
+  $('pitchList').innerHTML = ''; selItems = [];
+  var topics = (cfg.sessions || []).slice(0, 8).map(function(s){ return s.title; }).filter(Boolean).join('; ');
+  var prompt = 'I am attending a conference' + (cfg.brandName ? ' called "' + cfg.brandName + '"' : '') + '.' +
+    (topics ? ' Some of its session topics: ' + topics.slice(0, 600) + '.' : '') +
+    ' MY COMPANY (what we sell): """' + (cfg.companySummary || '').slice(0, 1800) + '""".' +
+    ' Give me 4-6 short talking points connecting my company to this conference — angles for' +
+    ' booth conversations that tie what we sell to why this specific audience would care.' +
+    ' Respond ONLY with valid JSON: {"points":["point 1","point 2"]}';
+  if (typeof PluginMessageHandler !== 'undefined'){
+    expect = 'pitch';
+    PluginMessageHandler.postMessage(JSON.stringify({ message: prompt, useLLM: true, wantsR1Response: false }));
+    setTimeout(function(){ if (expect === 'pitch'){ expect = null; $('pitchBody').innerHTML = '<div class="center">LLM didn\'t respond.<br>Try again.</div>'; } }, 25000);
+  } else {
+    $('pitchBody').innerHTML = '<div class="center">LLM unavailable on this device.</div>';
+  }
+}
+function renderPitchPoints(points){
+  $('pitchBody').innerHTML = '<h3>ALIGN YOUR PITCH</h3><ul>' + points.map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>';
+  $('pitchBody').style.overflow = 'hidden';
+  var L = $('pitchList'); L.innerHTML = '';
+  L.appendChild(mkRow('↻', 'Regenerate', 'fresh take from current company info', runPitchPoints));
+  registerList(L);
+}
+function pushPitchPoints(points){
+  cfg.pitchPoints = points;
+  saveLocal();
+  wakeFetch(BACKEND + '/api/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ d: devId, pitchPoints: points })
+  }).catch(function(){});
+}
+
 window.onPluginMessage = function(data){
   if (expect === 'intel'){
     expect = null;
@@ -667,6 +765,19 @@ window.onPluginMessage = function(data){
       if (curIntelFor) pushIntel(curIntelFor.id, o);
     } catch(e){
       $('intelBody').innerHTML = '<h3>INTEL</h3><div>' + esc(String(data.message||payload).slice(0,900)) + '</div>';
+    }
+  } else if (expect === 'pitch'){
+    expect = null;
+    var pPayload = data.data || data.message || '';
+    try {
+      var pm = String(pPayload).match(/\{[\s\S]*\}/);
+      var po = JSON.parse(pm ? pm[0] : pPayload);
+      var points = Array.isArray(po.points) ? po.points.filter(Boolean) : [];
+      if (!points.length) throw new Error('empty');
+      renderPitchPoints(points);
+      pushPitchPoints(points);
+    } catch(e){
+      $('pitchBody').innerHTML = '<h3>TALKING POINTS</h3><div>' + esc(String(data.message||pPayload).slice(0,900)) + '</div>';
     }
   }
 };

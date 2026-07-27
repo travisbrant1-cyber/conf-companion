@@ -36,6 +36,9 @@ data/*.json        per-device config (gitignored; regenerated at runtime)
 - `GET /manifest.json?d=<id>` → PWA manifest (start_url points at `/phone`)
 - `GET /healthz` → `{ ok:true, up:N }` (UptimeRobot pings this every 5 min to keep the free instance awake)
 - `GET|POST /api/config?d=<id>` → per-device config (POST bumps `rev`, merges `favs`)
+- `DELETE /api/config?d=<id>` → "start fresh": deletes the device's config file entirely.
+  `loadConfig()` falls back to the pristine default (rev 0) once it's gone, so the R1's
+  20s poll notices the rev change and picks up the reset on its own.
 - `POST /api/schedule` `{url,d}` → fetch+parse agenda, save sessions
 - `POST /api/extract` `{url,save}` → scrape a page to text (company summary)
 - `POST /api/intel` `{prospect,prospectUrl,d}` → bundle my-company + prospect text for the R1 LLM
@@ -50,7 +53,7 @@ data/*.json        per-device config (gitignored; regenerated at runtime)
 ```
 { name, linkedin, landing, landingLabel, companyUrl, companySummary,
   scheduleUrl, sessions:[{id,time,title,speaker,desc,day}], favs:{},
-  intel:{ [sessionId]: {who,angle,openers:[],avoid} },
+  intel:{ [sessionId]: {who,angle,openers:[],avoid} }, pitchPoints:[],
   brandName, brandColor, rev }
 ```
 
@@ -333,6 +336,82 @@ visual languages, MIT licensed. Used it to reskin all three surfaces to **Linear
   from Unicode ranges that render as plain text glyphs (Geometric Shapes /
   Arrows blocks), not the emoji range, so they stay monochrome and pick up
   `--on-accent` like the rest of the badge.
+
+## Phone time bug, multi-day schedule, touch-scroll, reset (2026-07-26, uncommitted)
+- **Phone-side time-badge bug fixed** — same root cause class as the R1 one from
+  the previous round, but phone.html's version was worse: it never stripped any
+  prefix at all, just AM/PM letters, so a date prefix like `"Aug 09 9:00 AM"`
+  left `"ug09"` fused onto the digits (`"ug095"`, `"ug108"` in the field
+  report). Replaced with the same `timeBadge(t)` approach as the R1 —
+  `\d{1,2}:\d{2}` matched anywhere in the string — duplicated locally in
+  `phone.html` since the two files share no JS module system.
+- **R1 schedule now supports multi-day agendas.** When sessions carry more than
+  one distinct `s.day` value, a horizontal, tap-scrollable row of day pills
+  (`#dayTabs`) appears between the header and the list: "ALL" plus one pill per
+  day, in agenda order (not alphabetical). Selecting a day filters the list to
+  just that day (day dividers only render in the ALL view, since a filtered
+  single day is already homogeneous) and appends "Previous day"/"Next day" as
+  real `.row` entries at the end of the list — deliberately real rows, not
+  just tab-row buttons, so scroll-wheel/PTT hardware nav can reach day-to-day
+  movement too, not just touch. Single-day agendas (or heuristic-parsed ones,
+  which never set `.day`) are unaffected — `multiDay` stays false and rendering
+  is byte-for-byte the old behavior.
+- **Native touch-scroll enabled** on all `.list` containers (home, schedule,
+  session actions, saved-intel) — they were `overflow:hidden`, meaning the
+  *only* way to scroll was the programmatic scroll-into-view driven by
+  PTT/scroll-wheel selection; touch-dragging a list did nothing. Now
+  `overflow-y:auto`, which also happens to make the existing `.daydiv`
+  `position:sticky` actually functional (sticky needs a scrolling ancestor,
+  which didn't really exist before).
+- **"Delete and start fresh"** — new `DELETE /api/config` endpoint (see Routes
+  above) plus a "Danger zone" section at the bottom of `setup.html` with a
+  two-step in-page confirmation (not just a browser `confirm()`, which is easy
+  to reflexively click through). Deliberately setup.html-only, not on the R1
+  home menu — a destructive action felt like too much risk on a screen driven
+  by an easy-to-overshoot scroll wheel. Clears `localStorage.cc_backup` on
+  reset too, since otherwise setup.html's own free-tier-disk-reset safety net
+  (`restoreIfEmpty()`) would immediately re-upload the old backup and undo the
+  reset. Verified live: reset on setup.html, confirmed the server file was
+  actually gone (`rev` back to 0), reloaded the R1 and watched it come up
+  fully blank.
+- **Data-isolation clarified for the user** (asked directly, worth restating
+  here): the server's per-device JSON file is the source of truth; phone-side
+  localStorage is only ever a cache/backup of that *same* device's own synced
+  config (for surviving Render free-tier disk resets), never an independent or
+  shared store. Isolation between different installs = different device IDs;
+  the device ID remains the entire security boundary (documented earlier under
+  "CORS / ID tradeoff") — fine for a single salesperson's own R1 + phone, worth
+  remembering if this same deployment is ever handed to other people to
+  install.
+
+## Company "talking points" replace the raw scrape (2026-07-26, uncommitted)
+The phone's "Your pitch / company" section used to just dump the raw
+`companySummary` scrape verbatim — a wall of nav-menu/boilerplate text, not
+useful to glance at. Replaced with the same architecture as prospect intel:
+R1 (only surface with an on-device LLM) generates 4-6 bullet-point talking
+points connecting the company to *this specific conference*, pushes them to
+`/api/config` as `pitchPoints: []`, and the phone mirrors the result.
+- New R1 screen `#pitch` ("TALKING POINTS"), reached via a new home row
+  ("Talking points", sparkle icon, same as Prospect intel). Gated on
+  `cfg.companySummary` existing (unlike prospect intel, there's nothing to
+  build talking points *from* without it — this is the one place where
+  requiring the company scan first still makes sense).
+- Prompt includes the event name (`cfg.brandName`) and up to 8 session titles
+  as conference-flavor context alongside the company summary — the point is
+  aligning the company to *this* conference, not just restating the pitch.
+- Unlike per-session intel, this is a single cached result (one company, not
+  one per prospect) with an explicit "Regenerate" row rather than re-running
+  the LLM every time you open the screen just to glance at it.
+- `phone.html`'s section is renamed "Talking points" and shows the bullet
+  list if `pitchPoints` exist, a "scanned but not generated yet — see R1"
+  hint if only `companySummary` exists, or the original "not set" message.
+- Verified live: since the desktop preview has no `PluginMessageHandler`,
+  confirmed the graceful "LLM unavailable on this device" fallback renders
+  correctly, then simulated a successful LLM reply via
+  `window.onPluginMessage(...)` to verify rendering, the push to
+  `/api/config`, and the phone picking it up — full loop confirmed working
+  even though the real on-device LLM call itself can only be tested on
+  physical hardware.
 
 ## Run locally
 ```bash

@@ -100,7 +100,7 @@
 </section>
 
 <section id="secIntel">
-  <h3>Your pitch / company</h3>
+  <h3>Talking points</h3>
   <div id="intelText" class="muted">Not set — add your company site in setup.</div>
 </section>
 
@@ -177,9 +177,17 @@ function render(){
     $('landHdr').textContent = (cfg.landingLabel||'Landing page');
     $('landLink').textContent = cfg.landing; $('secLand').style.display='block';
   } else { $('secLand').style.display='none'; }
-  // Intel
-  if (cfg.companySummary){ $('intelText').textContent = cfg.companySummary; $('intelText').className=''; }
-  else { $('intelText').textContent = 'Not set — add your company site in setup.'; $('intelText').className='muted'; }
+  // Talking points — generated on the R1 (only surface with an on-device LLM); this just mirrors
+  // whatever's landed, rather than showing the raw company-site scrape it used to.
+  if ((cfg.pitchPoints||[]).length){
+    $('intelText').innerHTML = '<ul style="margin:0 0 0 18px;padding:0">' + cfg.pitchPoints.map(function(p){ return '<li style="margin-bottom:4px">'+esc(p)+'</li>'; }).join('') + '</ul>';
+    $('intelText').className = '';
+  } else if (cfg.companySummary){
+    $('intelText').textContent = 'Company site scanned — talking points not generated yet. On the R1: Home → Talking points.';
+    $('intelText').className = 'muted';
+  } else {
+    $('intelText').textContent = 'Not set — add your company site in setup.'; $('intelText').className='muted';
+  }
   // Pair
   if (DEV){ var purl = location.origin + '/setup?d=' + DEV; qr($('pairQR'), purl); $('pairLink').textContent = purl; }
   renderSchedule();
@@ -202,7 +210,7 @@ function renderSchedule(){
       (Array.isArray(iv.openers) && iv.openers.length ? '<div><b>Openers:</b><ul>'+iv.openers.map(function(q){ return '<li>'+esc(q)+'</li>'; }).join('')+'</ul></div>' : '') +
       (iv.avoid ? '<div><b>Avoid:</b> '+esc(iv.avoid)+'</div>' : '') +
       '</div>';
-    row.innerHTML = '<div class="top"><div class="time">'+esc(s.time.split(/[-–]/)[0].replace(/[APMapm\s]/g,'').slice(0,5)||'·')+'</div>'+
+    row.innerHTML = '<div class="top"><div class="time">'+esc(timeBadge(s.time))+'</div>'+
       '<div class="title">'+esc(s.title)+'</div>'+(iv?'<div class="badge" title="intel ready">🧠</div>':'')+'<div class="star'+(favs[s.id]?' on':'')+'">'+(favs[s.id]?'★':'☆')+'</div></div>'+det;
     row.querySelector('.star').addEventListener('click', function(e){ e.stopPropagation(); toggleFav(s.id); });
     row.addEventListener('click', function(){ row.classList.toggle('open'); });
@@ -215,6 +223,13 @@ function renderSchedule(){
   var fn = favSs.length; $('schedCount').textContent = ss.length + ' · ' + fn + '★';
 }
 function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+// Pull "H:MM" out of s.time wherever it appears, instead of trying to strip a prefix — the
+// prefix shape varies (day name, date like "Aug 09", nothing at all) and stripping only
+// AM/PM letters left date prefixes fused into the digits (e.g. "Aug 09 9:00 AM" -> "ug095").
+function timeBadge(t){
+  var m = String(t || '').match(/\d{1,2}:\d{2}/);
+  return m ? m[0] : (String(t || '').slice(0, 5) || '·');
+}
 // ---------- schedule collapse (persisted — a long agenda otherwise pushes everything else down the page) ----------
 var schedCollapsed = false;
 try { schedCollapsed = localStorage.getItem('cc_sched_collapsed') === '1'; } catch(e){}
